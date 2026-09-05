@@ -2,7 +2,7 @@
 //  CalendarManager.swift
 //  Startline
 //
-//  EventKit 연동 — 권한 요청 및 이번 달 일정 조회.
+//  EventKit 연동 — 권한 요청 및 임의 월 범위의 일정 조회.
 //  명세서 Phase 1 「EventKit 권한 + 일정 읽기」
 //
 
@@ -21,6 +21,15 @@ enum CalendarAccessState {
     case authorized
 }
 
+/// 그리드 요일 머리글 한 칸. `weekday` 는 Calendar 기준(1 = 일요일).
+struct WeekdayHeader: Identifiable {
+    let column: Int
+    let weekday: Int
+    let symbol: String
+
+    var id: Int { column }
+}
+
 @Observable
 final class CalendarManager {
 
@@ -31,8 +40,20 @@ final class CalendarManager {
     /// 접근 가능한 전체 캘린더 (이름 + 소스명 표시용).
     private(set) var calendars: [EKCalendar] = []
 
-    /// 이번 달 1일 00:00 ~ 말일 23:59:59 범위의 일정. 시작시각 오름차순.
+    /// 현재 읽어둔 범위의 일정 전체. 시작시각 오름차순.
     private(set) var events: [EKEvent] = []
+
+    /// 날짜(자정 기준) → 그 날에 걸치는 일정. 여러 날에 걸친 일정은 각 날에 모두 들어간다.
+    private(set) var eventsByDay: [Date: [EKEvent]] = [:]
+
+    /// 그리드가 표시 중인 달. 항상 그 달 1일 00:00.
+    private(set) var displayedMonth: Date
+
+    /// 우측 상세 패널이 보여줄 날짜.
+    var selectedDate: Date
+
+    /// 실제로 읽어둔 날짜 범위. 그리드에 보이는 앞뒤 달 날짜까지 포함한다.
+    private(set) var loadedRange: (start: Date, end: Date)?
 
     /// 권한 요청 중 에러가 발생한 경우의 메시지.
     private(set) var errorMessage: String?
@@ -41,7 +62,14 @@ final class CalendarManager {
 
     private let eventStore = EKEventStore()
 
-    init() {
+    /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
+    let calendar: Calendar
+
+    init(calendar: Calendar = .current, now: Date = Date()) {
+        self.calendar = calendar
+        self.displayedMonth = Self.startOfMonth(for: now, calendar: calendar)
+        self.selectedDate = calendar.startOfDay(for: now)
+
         refreshAccessState()
         if accessState == .authorized {
             loadCalendarsAndEvents()
@@ -83,12 +111,48 @@ final class CalendarManager {
         }
     }
 
+    // MARK: - 월 이동
+
+    /// 표시 월을 바꾸고 해당 그리드 범위의 일정을 다시 읽는다.
+    func setDisplayedMonth(_ date: Date) {
+        displayedMonth = Self.startOfMonth(for: date, calendar: calendar)
+
+        // 선택 날짜가 새 달 밖이면 그 달 1일로 옮긴다.
+        // 단 오늘이 새 달 안이면 오늘을 선택한다.
+        if !isInDisplayedMonth(selectedDate) {
+            let today = calendar.startOfDay(for: Date())
+            selectedDate = isInDisplayedMonth(today) ? today : displayedMonth
+        }
+
+        loadEventsForDisplayedMonth()
+    }
+
+    func goToPreviousMonth() {
+        guard let previous = calendar.date(byAdding: .month, value: -1, to: displayedMonth) else { return }
+        setDisplayedMonth(previous)
+    }
+
+    func goToNextMonth() {
+        guard let next = calendar.date(byAdding: .month, value: 1, to: displayedMonth) else { return }
+        setDisplayedMonth(next)
+    }
+
+    func goToToday() {
+        let today = Date()
+        setDisplayedMonth(today)
+        selectedDate = calendar.startOfDay(for: today)
+    }
+
+    func isInDisplayedMonth(_ date: Date) -> Bool {
+        calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month)
+    }
+
     // MARK: - 조회
 
-    /// 접근 가능한 캘린더 목록과 이번 달 일정을 다시 읽는다.
+    /// 캘린더 목록과 현재 표시 월의 일정을 다시 읽는다.
     func loadCalendarsAndEvents() {
         loadCalendars()
-        loadEventsForCurrentMonth()
+        loadEventsForDisplayedMonth()
     }
 
     private func loadCalendars() {
@@ -102,42 +166,136 @@ final class CalendarManager {
             }
     }
 
-    private func loadEventsForCurrentMonth() {
-        guard let range = Self.currentMonthRange() else {
+    /// 표시 월의 그리드 전체 범위(앞뒤 달의 채움 날짜 포함)를 읽는다.
+    private func loadEventsForDisplayedMonth() {
+        let days = gridDays()
+        guard let first = days.first,
+              let last = days.last,
+              let end = calendar.date(byAdding: .day, value: 1, to: last)
+        else {
             events = []
+            eventsByDay = [:]
+            loadedRange = nil
+            return
+        }
+        loadEvents(from: first, to: end.addingTimeInterval(-1))
+    }
+
+    /// 임의의 날짜 범위에 걸치는 일정을 읽는다.
+    /// - Parameters:
+    ///   - start: 범위 시작 (포함)
+    ///   - end: 범위 끝 (포함)
+    func loadEvents(from start: Date, to end: Date) {
+        guard accessState == .authorized else {
+            events = []
+            eventsByDay = [:]
+            loadedRange = nil
             return
         }
 
         // calendars: nil → 접근 가능한 전체 캘린더 대상.
         let predicate = eventStore.predicateForEvents(
-            withStart: range.start,
-            end: range.end,
+            withStart: start,
+            end: end,
             calendars: nil
         )
 
-        events = eventStore.events(matching: predicate)
-            .sorted { lhs, rhs in
-                let l = lhs.startDate ?? .distantFuture
-                let r = rhs.startDate ?? .distantFuture
-                if l != r { return l < r }
-                return (lhs.title ?? "") < (rhs.title ?? "")
-            }
+        events = eventStore.events(matching: predicate).sorted(by: Self.isOrderedBefore)
+        eventsByDay = bucketByDay(events, rangeStart: start, rangeEnd: end)
+        loadedRange = (start, end)
     }
 
-    // MARK: - 날짜 계산
+    /// 특정 날짜에 걸치는 일정.
+    func events(on date: Date) -> [EKEvent] {
+        eventsByDay[calendar.startOfDay(for: date)] ?? []
+    }
 
-    /// 이번 달 1일 00:00 부터 다음 달 1일 00:00 직전까지.
-    static func currentMonthRange(
-        calendar: Calendar = .current,
-        now: Date = Date()
-    ) -> (start: Date, end: Date)? {
-        let components = calendar.dateComponents([.year, .month], from: now)
-        guard let start = calendar.date(from: components),
-              let nextMonth = calendar.date(byAdding: .month, value: 1, to: start)
-        else { return nil }
+    // MARK: - 그리드 날짜 계산
 
-        // 말일 23:59:59 까지 포함하도록 다음 달 1일 직전으로 끝점을 잡는다.
-        let end = nextMonth.addingTimeInterval(-1)
-        return (start, end)
+    /// 표시 월을 덮는 주 단위 날짜 배열. 앞뒤로 인접 달의 날짜가 채워진다.
+    /// 주 수는 달에 맞춰 4~6주로 달라진다.
+    func gridDays() -> [Date] {
+        Self.gridDays(for: displayedMonth, calendar: calendar)
+    }
+
+    static func gridDays(for month: Date, calendar: Calendar) -> [Date] {
+        let monthStart = startOfMonth(for: month, calendar: calendar)
+        guard let dayCount = calendar.range(of: .day, in: .month, for: monthStart)?.count
+        else { return [] }
+
+        // 그 주의 첫 요일까지 앞으로 당긴 시작점.
+        let weekday = calendar.component(.weekday, from: monthStart)
+        let leading = (weekday - calendar.firstWeekday + 7) % 7
+        guard let gridStart = calendar.date(byAdding: .day, value: -leading, to: monthStart)
+        else { return [] }
+
+        // 앞 채움 + 이번 달 일수를 7의 배수로 올림.
+        let total = Int(ceil(Double(leading + dayCount) / 7.0)) * 7
+
+        return (0..<total).compactMap {
+            calendar.date(byAdding: .day, value: $0, to: gridStart)
+        }
+    }
+
+    /// 그리드 열 순서에 맞춘 요일 머리글.
+    func weekdayHeaders() -> [WeekdayHeader] {
+        let symbols = calendar.shortStandaloneWeekdaySymbols
+        let offset = calendar.firstWeekday - 1
+        return (0..<symbols.count).map { index in
+            let position = (index + offset) % symbols.count
+            return WeekdayHeader(column: index, weekday: position + 1, symbol: symbols[position])
+        }
+    }
+
+    static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
+    // MARK: - 일자별 분류
+
+    /// 여러 날에 걸친 일정을 각 날짜 버킷에 모두 넣는다.
+    private func bucketByDay(
+        _ events: [EKEvent],
+        rangeStart: Date,
+        rangeEnd: Date
+    ) -> [Date: [EKEvent]] {
+        var result: [Date: [EKEvent]] = [:]
+
+        for event in events {
+            guard let start = event.startDate else { continue }
+            var end = event.endDate ?? start
+
+            // 자정에 정확히 끝나는 일정이 다음 날까지 번지지 않도록 한다.
+            // (예: 22:00 ~ 다음날 00:00 은 시작일 하루짜리로 본다.)
+            if !event.isAllDay, end > start, end == calendar.startOfDay(for: end) {
+                end = end.addingTimeInterval(-1)
+            }
+
+            var day = calendar.startOfDay(for: max(start, rangeStart))
+            let lastDay = calendar.startOfDay(for: min(end, rangeEnd))
+
+            while day <= lastDay {
+                result[day, default: []].append(event)
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+            }
+        }
+
+        for (day, dayEvents) in result {
+            result[day] = dayEvents.sorted(by: Self.isOrderedBefore)
+        }
+        return result
+    }
+
+    /// 종일 일정 우선, 그 다음 시작시각, 그 다음 제목.
+    private static func isOrderedBefore(_ lhs: EKEvent, _ rhs: EKEvent) -> Bool {
+        if lhs.isAllDay != rhs.isAllDay { return lhs.isAllDay }
+
+        let l = lhs.startDate ?? .distantFuture
+        let r = rhs.startDate ?? .distantFuture
+        if l != r { return l < r }
+
+        return (lhs.title ?? "") < (rhs.title ?? "")
     }
 }

@@ -5,7 +5,6 @@
 //  Created by 문정환 on 9/5/26.
 //
 
-import EventKit
 import SwiftUI
 
 struct ContentView: View {
@@ -19,10 +18,16 @@ struct ContentView: View {
             case .denied:
                 AccessDeniedView()
             case .authorized:
-                CalendarContentView(manager: manager)
+                // 명세서 4.2 — 좌: 월간 그리드 / 우: 선택 날짜 상세
+                HSplitView {
+                    MonthGridView(manager: manager)
+                        .frame(minWidth: 480, idealWidth: 700)
+                    DayDetailView(manager: manager)
+                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 460)
+                }
             }
         }
-        .frame(minWidth: 520, minHeight: 480)
+        .frame(minWidth: 800, minHeight: 560)
     }
 }
 
@@ -58,6 +63,7 @@ private struct AccessRequestView: View {
             }
         }
         .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -89,157 +95,8 @@ private struct AccessDeniedView: View {
             }
         }
         .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-}
-
-// MARK: - 권한 승인
-
-private struct CalendarContentView: View {
-    let manager: CalendarManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CalendarSourceListView(calendars: manager.calendars)
-
-            Divider()
-
-            HStack {
-                Text(Self.monthTitle)
-                    .font(.headline)
-                Spacer()
-                Text("일정 \(manager.events.count)개")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    manager.loadCalendarsAndEvents()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("다시 불러오기")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            if manager.events.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("이번 달 일정이 없습니다.")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                List {
-                    ForEach(Array(manager.events.enumerated()), id: \.offset) { _, event in
-                        EventRow(event: event)
-                    }
-                }
-                .listStyle(.inset)
-            }
-        }
-    }
-
-    private static var monthTitle: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.setLocalizedDateFormatFromTemplate("yMMMM")
-        return formatter.string(from: Date())
-    }
-}
-
-/// 접근 가능한 전체 캘린더 목록 — 이름 + 소속 소스명.
-private struct CalendarSourceListView: View {
-    let calendars: [EKCalendar]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("접근 가능한 캘린더 (\(calendars.count))")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-
-            if calendars.isEmpty {
-                Text("등록된 캘린더가 없습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(calendars, id: \.calendarIdentifier) { calendar in
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(Color(cgColor: calendar.cgColor))
-                                    .frame(width: 8, height: 8)
-                                Text(calendar.title)
-                                    .font(.caption)
-                                Text(calendar.source.title)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 120)
-            }
-        }
-        .padding(16)
-    }
-}
-
-/// 일정 한 행 — [시작시각] [제목] [소속 캘린더명]
-private struct EventRow: View {
-    let event: EKEvent
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(startText)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
-
-            Text(event.title ?? "(제목 없음)")
-                .font(.body)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 5) {
-                if let cgColor = event.calendar?.cgColor {
-                    Circle()
-                        .fill(Color(cgColor: cgColor))
-                        .frame(width: 8, height: 8)
-                }
-                Text(event.calendar?.title ?? "(캘린더 없음)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var startText: String {
-        guard let startDate = event.startDate else { return "-" }
-        if event.isAllDay {
-            return Self.dayFormatter.string(from: startDate) + " 종일"
-        }
-        return Self.dateTimeFormatter.string(from: startDate)
-    }
-
-    private static let dateTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.setLocalizedDateFormatFromTemplate("MdE HHmm")
-        return formatter
-    }()
-
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.setLocalizedDateFormatFromTemplate("MdE")
-        return formatter
-    }()
 }
 
 #Preview {
