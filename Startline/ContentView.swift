@@ -5,11 +5,15 @@
 //  Created by 문정환 on 9/5/26.
 //
 
+import AppKit
 import SwiftData
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @State private var manager = CalendarManager()
+    @State private var saver = PersistenceReporter()
     /// 그리드에서 클릭한 일정. 우측 패널이 편집 시트를 연다.
     @State private var eventToOpen: DayEvent?
 
@@ -34,6 +38,26 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 940, idealWidth: 1180, minHeight: 640, idealHeight: 820)
+        .environment(saver)
+        // 앱이 닫히거나 뒤로 물러날 때 미저장 변경을 마저 쓴다.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saver.commit(modelContext)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
+            saver.commit(modelContext)
+        }
+        .alert("저장 문제", isPresented: saveErrorBinding) {
+            Button("확인") { saver.clearError() }
+        } message: {
+            Text(saver.lastErrorMessage ?? "")
+        }
+    }
+
+    private var saveErrorBinding: Binding<Bool> {
+        Binding(
+            get: { saver.lastErrorMessage != nil },
+            set: { if !$0 { saver.clearError() } }
+        )
     }
 }
 
@@ -108,4 +132,5 @@ private struct AccessDeniedView: View {
 #Preview {
     ContentView()
         .modelContainer(for: ManagedTask.self, inMemory: true)
+        .environment(PersistenceReporter())
 }

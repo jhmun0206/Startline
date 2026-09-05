@@ -85,6 +85,9 @@ struct JudgmentBadge: View {
 // MARK: - 할 일 행
 
 struct TaskRow: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(PersistenceReporter.self) private var saver
+
     let resolved: ResolvedTask
     /// 일정 아래에 딸린 할 일이면 들여쓴다.
     var isNested = false
@@ -140,11 +143,15 @@ struct TaskRow: View {
         .padding(.vertical, 3)
         .contextMenu {
             if task.status == .notStarted {
-                // 명세서 8.1 — 이 기록이 9장 캘리브레이션의 입력이 된다.
-                Button("지금 시작") { task.markStarted() }
+                // 명세서 9.1 — 이 기록이 10장 캘리브레이션의 입력이 된다.
+                Button("지금 시작") {
+                    saver.perform(modelContext) { task.markStarted() }
+                }
             }
             if task.status != .notStarted {
-                Button("미시작으로 되돌리기") { task.markNotStarted() }
+                Button("미시작으로 되돌리기") {
+                    saver.perform(modelContext) { task.markNotStarted() }
+                }
             }
             Button("편집", action: onEdit)
             Divider()
@@ -153,10 +160,12 @@ struct TaskRow: View {
     }
 
     private func toggleDone() {
-        if task.status == .done {
-            task.markNotStarted()
-        } else {
-            task.markDone()
+        saver.perform(modelContext) {
+            if task.status == .done {
+                task.markNotStarted()
+            } else {
+                task.markDone()
+            }
         }
     }
 

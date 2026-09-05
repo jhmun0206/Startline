@@ -52,8 +52,8 @@ struct MonthGridView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 20)
     }
 }
 
@@ -106,8 +106,8 @@ private struct MonthHeaderView: View {
             .help("다시 불러오기")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
     }
 
     private var monthTitle: String {
@@ -171,7 +171,7 @@ private struct WeekdayHeaderView: View {
             }
         }
         .padding(.vertical, 6)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 20)
     }
 }
 

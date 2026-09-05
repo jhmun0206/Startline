@@ -16,6 +16,7 @@ struct DayDetailView: View {
     @Binding var eventToOpen: DayEvent?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(PersistenceReporter.self) private var saver
 
     // Phase 1 의 항목 수는 적어서 전체를 읽고 메모리에서 거른다. (BL-017)
     @Query(sort: \ManagedTask.createdAt) private var allTasks: [ManagedTask]
@@ -79,7 +80,8 @@ struct DayDetailView: View {
                 }
             }
             .listStyle(.inset)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 20)
         }
         .onReceive(clock) { now = $0 }
         .task(id: manager.displayedMonth) { syncLinks() }
@@ -180,7 +182,7 @@ struct DayDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.vertical, 12)
     }
 
@@ -189,6 +191,8 @@ struct DayDetailView: View {
     /// 부모 일정 상태를 저장값에 반영한다. 화면을 그리는 중이 아니라 여기서만 쓴다.
     private func syncLinks() {
         let detached = TaskLinkMaintenance.sync(tasks: allTasks, manager: manager)
+        // 부모 이동에 따른 마감 갱신과 독립 전환도 즉시 디스크에 쓴다.
+        saver.commit(modelContext)
         if !detached.isEmpty { detachedNotices = detached }
     }
 
@@ -202,6 +206,7 @@ struct DayDetailView: View {
 
     private func delete(_ resolved: ResolvedTask) {
         modelContext.delete(resolved.task)
+        saver.commit(modelContext)
     }
 
     private var detachedAlertBinding: Binding<Bool> {

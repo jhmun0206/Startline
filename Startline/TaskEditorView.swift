@@ -18,6 +18,8 @@ struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @Environment(PersistenceReporter.self) private var saver
+
     @State private var isConfirmingDelete = false
 
     /// 편집 대상. nil 이면 새로 만든다.
@@ -69,41 +71,52 @@ struct TaskEditorView: View {
                 hasUnsavedInput: hasUnsavedInput
             ) { dismiss() }
 
-            Form {
-                Section {
-                    TextField("제목", text: $title)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    SheetTextField(
+                        placeholder: "새로운 할 일",
+                        text: $title,
+                        font: .title3
+                    )
 
-                Section("언제까지") {
                     dueModeSelector
 
                     switch dueMode {
                     case .specificDate:
-                        DatePicker("날짜", selection: $dueAt, displayedComponents: .date)
-                        DatePicker("시간", selection: $dueAt, displayedComponents: .hourAndMinute)
+                        SheetField {
+                            HStack(spacing: 6) {
+                                DatePicker("", selection: $dueAt, displayedComponents: .date)
+                                    .labelsHidden()
+                                    .datePickerStyle(.field)
+                                DatePicker("", selection: $dueAt, displayedComponents: .hourAndMinute)
+                                    .labelsHidden()
+                                    .datePickerStyle(.field)
+                                Text("까지")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .environment(\.locale, .startlineDisplay)
+
                     case .attachedToEvent:
                         parentEventRow
                     }
-                }
-                .environment(\.locale, .startlineDisplay)
 
-                Section("얼마나 걸릴까요") {
-                    presetRow
-                    manualRow
+                    durationBlock
 
                     if estimatedDuration == nil {
                         reminderFallback
                     }
-                }
 
-                if let deadline = startDeadline {
-                    Section("이때 시작해야 해요") {
-                        Text("\(StartlineFormat.spokenDayTime(deadline))에 시작해야 해요")
-                            .font(.callout)
+                    if let deadline = startDeadline {
+                        startNote(deadline)
                     }
                 }
+                .padding(.horizontal, SheetMetrics.padding)
+                .padding(.bottom, 14)
             }
-            .formStyle(.grouped)
+            .frame(maxHeight: SheetMetrics.maxContentHeight)
 
             Divider()
 
@@ -118,7 +131,7 @@ struct TaskEditorView: View {
             }
             .padding(16)
         }
-        .frame(width: 440)
+        .frame(width: SheetMetrics.width)
         .onAppear(perform: load)
         .alert("이 할 일을 지울까요?", isPresented: $isConfirmingDelete) {
             Button("지우기", role: .destructive) { delete() }
@@ -126,6 +139,24 @@ struct TaskEditorView: View {
         } message: {
             Text("‘\(title)’를 목록에서 지워요. 연결된 일정은 그대로 남아요.")
         }
+    }
+
+    /// 착수마감이 산출될 때만 나온다. 남은 시간을 숫자로 환산하지 않는다. (명세서 5.4)
+    private func startNote(_ deadline: Date) -> some View {
+        Label(
+            "\(StartlineFormat.spokenDayTime(deadline))에 시작해야 해요",
+            systemImage: "flag"
+        )
+        .font(.callout)
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: SheetMetrics.corner)
+                .fill(Color.accentColor.opacity(0.12))
+        )
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - 「언제까지」 방식 고르기
@@ -166,30 +197,35 @@ struct TaskEditorView: View {
     /// 사람은 "언제쯤"으로 일정을 기억하므로 날짜에서 출발하는 편이 찾기 쉽다.
     @ViewBuilder
     private var parentEventRow: some View {
-        MiniCalendarPicker(
-            manager: manager,
-            selection: $parentEvent,
-            anchorDate: defaultDueDate
-        )
+        SheetField {
+            MiniCalendarPicker(
+                manager: manager,
+                selection: $parentEvent,
+                anchorDate: defaultDueDate
+            )
+        }
 
         if let parentEvent {
-            Divider()
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(parentEvent.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
-                    .frame(width: 9, height: 9)
-                Text(parentEvent.title ?? "(제목 없음)")
-                    .font(.callout.bold())
-                    .lineLimit(1)
-                Spacer(minLength: 6)
-                Stepper(value: $daysBeforeParent, in: 0...365) {
-                    Text(daysBeforeParent == 0 ? "당일까지" : "\(daysBeforeParent)일 전까지")
-                        .font(.callout)
+            SheetField(verticalPadding: 5) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(parentEvent.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
+                        .frame(width: 9, height: 9)
+                    Text(parentEvent.title ?? "(제목 없음)")
+                        .font(.callout.bold())
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Stepper(value: $daysBeforeParent, in: 0...365) {
+                        Text(daysBeforeParent == 0 ? "당일" : "\(daysBeforeParent)일 전")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                    .fixedSize()
                 }
-                .fixedSize()
             }
         } else {
-            Text("위에서 일정을 하나 고르세요.")
+            Text("위 달력에서 일정을 하나 고르세요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -202,37 +238,65 @@ struct TaskEditorView: View {
 
     // MARK: - 소요시간 입력
 
-    private var presetRow: some View {
-        HStack(spacing: 6) {
-            ForEach(DurationPreset.all) { preset in
-                Button(preset.label) { apply(preset) }
-                    .buttonStyle(.bordered)
-                    .tint(isSelected(preset) ? .accentColor : nil)
+    private var durationBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("얼마나 걸릴까요")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 5) {
+                ForEach(DurationPreset.all) { preset in
+                    presetChip(preset)
+                }
             }
-            Spacer()
+
+            SheetField(verticalPadding: 5) {
+                HStack(spacing: 5) {
+                    Text("직접")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("0", value: $hours, format: .number)
+                        .textFieldStyle(.plain)
+                        .frame(width: 34)
+                        .multilineTextAlignment(.trailing)
+                    Text("시간").font(.caption)
+                    TextField("0", value: $minutes, format: .number)
+                        .textFieldStyle(.plain)
+                        .frame(width: 34)
+                        .multilineTextAlignment(.trailing)
+                    Text("분").font(.caption)
+                    Spacer(minLength: 0)
+                    Button("지우기") {
+                        hours = 0
+                        minutes = 0
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(hours == 0 && minutes == 0)
+                }
+            }
         }
     }
 
-    private var manualRow: some View {
-        HStack(spacing: 6) {
-            Text("직접 입력")
-                .foregroundStyle(.secondary)
-            Spacer()
-            TextField("0", value: $hours, format: .number)
-                .frame(width: 46)
-                .multilineTextAlignment(.trailing)
-            Text("시간")
-            TextField("0", value: $minutes, format: .number)
-                .frame(width: 46)
-                .multilineTextAlignment(.trailing)
-            Text("분")
-            Button("지우기") {
-                hours = 0
-                minutes = 0
-            }
-            .buttonStyle(.borderless)
-            .disabled(hours == 0 && minutes == 0)
-        }
+    private func presetChip(_ preset: DurationPreset) -> some View {
+        let isOn = estimatedDuration == preset.duration
+
+        return Text(preset.label)
+            .font(.caption)
+            .fontWeight(isOn ? .semibold : .regular)
+            .foregroundStyle(isOn ? Color.accentColor : .primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isOn ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { apply(preset) }
     }
 
     private func apply(_ preset: DurationPreset) {
@@ -241,36 +305,47 @@ struct TaskEditorView: View {
         minutes = totalMinutes % 60
     }
 
-    private func isSelected(_ preset: DurationPreset) -> Bool {
-        estimatedDuration == preset.duration
-    }
-
     // MARK: - 소요시간을 모를 때
 
     /// 소요시간이 비어 있을 때만 나온다. 계산 방식을 묻는 대신
     /// "며칠 전에 알려줄까"라는 사용자가 답할 수 있는 질문으로 바꾼다.
     private var reminderFallback: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("얼마나 걸릴지 모르겠다면, 며칠 전에 알려드릴까요?")
-                .font(.callout)
+                .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 choiceButton("3일 전", .threeDays)
                 choiceButton("1주 전", .oneWeek)
                 choiceButton("알림 없음", .never)
-                Spacer()
             }
         }
     }
 
     private func choiceButton(_ label: String, _ choice: ReminderChoice) -> some View {
-        Button(label) {
-            reminderChoice = choice
-            preservedLeadTime = nil
-        }
-        .buttonStyle(.bordered)
-        .tint(reminderChoice == choice ? .accentColor : nil)
+        let isOn = reminderChoice == choice
+
+        return Text(label)
+            .font(.caption)
+            .fontWeight(isOn ? .semibold : .regular)
+            .foregroundStyle(isOn ? Color.accentColor : .primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isOn ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                reminderChoice = choice
+                preservedLeadTime = nil
+            }
     }
 
     // MARK: - 리드타임 결정
@@ -356,6 +431,7 @@ struct TaskEditorView: View {
     private func delete() {
         guard let task else { return }
         modelContext.delete(task)
+        saver.commit(modelContext)
         dismiss()
     }
 
@@ -407,6 +483,8 @@ struct TaskEditorView: View {
             modelContext.insert(newTask)
         }
 
+        // 지연 저장에 맡기지 않는다. 여기서 디스크까지 내려가야 한다.
+        saver.commit(modelContext)
         dismiss()
     }
 

@@ -16,6 +16,7 @@ struct EventEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(PersistenceReporter.self) private var saver
 
     let manager: CalendarManager
     /// 고칠 일정. nil 이면 새로 만든다.
@@ -69,39 +70,45 @@ struct EventEditorView: View {
                 editableBody
             }
         }
-        .frame(width: 440)
+        .frame(width: SheetMetrics.width)
         .onAppear(perform: load)
     }
 
     // MARK: - 읽기 전용
 
     /// 고칠 수 없는 일정은 편집 폼을 열지 않고 내용과 이유만 보여준다.
+    /// 고칠 수 없는 일정은 편집 폼을 열지 않고 내용과 이유만 보여준다.
     private var readOnlyBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: "일정 보기") { dismiss() }
 
-            Form {
-                Section {
-                    LabeledContent("제목", value: event?.title ?? "(제목 없음)")
-                    LabeledContent("때", value: eventTimeSummary)
-                    if let location = event?.location, !location.isEmpty {
-                        LabeledContent("장소", value: location)
+            VStack(alignment: .leading, spacing: 10) {
+                SheetField {
+                    Text(event?.title ?? "(제목 없음)")
+                        .font(.title3)
+                }
+                SheetField {
+                    Text(eventTimeSummary)
+                }
+                if let location = event?.location, !location.isEmpty {
+                    SheetField {
+                        Label(location, systemImage: "mappin.and.ellipse")
                     }
-                    LabeledContent("캘린더") {
-                        CalendarLabel(calendar: event?.calendar)
-                    }
+                }
+                SheetField {
+                    CalendarLabel(calendar: event?.calendar)
                 }
 
-                Section {
-                    Label(
-                        "‘\(event?.calendar?.title ?? "이 캘린더")’는 구독하거나 자동으로 만들어진 캘린더라 Startline에서 고칠 수 없어요. 원래 만든 곳에서 바꿔 주세요.",
-                        systemImage: "info.circle"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
+                Label(
+                    "‘\(event?.calendar?.title ?? "이 캘린더")’는 구독하거나 자동으로 만들어진 캘린더라 Startline에서 고칠 수 없어요. 원래 만든 곳에서 바꿔 주세요.",
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .formStyle(.grouped)
+            .padding(.horizontal, SheetMetrics.padding)
+            .padding(.bottom, 14)
 
             Divider()
             HStack {
@@ -122,57 +129,26 @@ struct EventEditorView: View {
                 hasUnsavedInput: hasUnsavedInput
             ) { dismiss() }
 
-            Form {
-                Section {
-                    TextField("제목", text: $title)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    // 라벨 대신 플레이스홀더가 무엇을 넣는 칸인지 말한다.
+                    SheetTextField(
+                        placeholder: "새로운 일정",
+                        text: $title,
+                        font: .title3
+                    )
 
-                Section("언제") {
-                    DatePicker("날짜", selection: $day, displayedComponents: .date)
-                    Toggle("하루 종일", isOn: $isAllDay)
-                    if !isAllDay {
-                        DatePicker("시작", selection: $startTime, displayedComponents: .hourAndMinute)
-                        DatePicker("끝", selection: $endTime, displayedComponents: .hourAndMinute)
-                    }
-                }
-                .environment(\.locale, .startlineDisplay)
+                    whenField
+                    calendarField
 
-                Section("캘린더") {
-                    if manager.writableCalendars.isEmpty {
-                        Text("새 일정을 넣을 수 있는 캘린더가 없어요.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        LabeledContent("캘린더") {
-                            CalendarPickerField(
-                                calendars: manager.writableCalendars,
-                                selectedID: $selectedCalendarID
-                            )
-                        }
-                    }
+                    if !isEditing { draftTaskSection }
+                    if isRecurring { recurringNote }
+                    if let errorMessage { errorNote(errorMessage) }
                 }
-
-                if !isEditing {
-                    draftTaskSection
-                }
-
-                if isRecurring {
-                    Section {
-                        Label("반복되는 일정이에요. 고치면 이 회차만 바뀌어요.", systemImage: "repeat")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                    }
-                }
+                .padding(.horizontal, SheetMetrics.padding)
+                .padding(.bottom, 14)
             }
-            .formStyle(.grouped)
+            .frame(maxHeight: SheetMetrics.maxContentHeight)
 
             Divider()
             footer
@@ -188,6 +164,65 @@ struct EventEditorView: View {
         } message: {
             Text(deleteWarning)
         }
+    }
+
+    /// "2026. 9. 23.  오전 9:00 ~ 오전 10:00" 을 한 줄로.
+    private var whenField: some View {
+        SheetField {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    DatePicker("", selection: $day, displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+
+                    if !isAllDay {
+                        DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                            .datePickerStyle(.field)
+                        Text("~")
+                            .foregroundStyle(.secondary)
+                        DatePicker("", selection: $endTime, displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                            .datePickerStyle(.field)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Toggle("하루 종일", isOn: $isAllDay)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+            }
+        }
+        .environment(\.locale, .startlineDisplay)
+    }
+
+    @ViewBuilder
+    private var calendarField: some View {
+        if manager.writableCalendars.isEmpty {
+            SheetField {
+                Text("새 일정을 넣을 수 있는 캘린더가 없어요.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            CalendarPickerField(
+                calendars: manager.writableCalendars,
+                selectedID: $selectedCalendarID
+            )
+        }
+    }
+
+    private var recurringNote: some View {
+        Label("반복되는 일정이에요. 고치면 이 회차만 바뀌어요.", systemImage: "repeat")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func errorNote(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.callout)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var footer: some View {
@@ -208,27 +243,38 @@ struct EventEditorView: View {
 
     /// 일정을 만들면서 준비 작업을 여러 개 한꺼번에 적는다.
     /// 저장하면 모두 이 일정에 딸린 할 일로 만들어진다. (명세서 8장)
+    ///
+    /// 이 블록만 설명 문구를 남긴다. 빈 칸만 있으면 무엇을 적는 자리인지 알 수 없다.
     private var draftTaskSection: some View {
-        Section("이 일정 전에 할 일") {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("이 일정 전에 미리 할 일")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             ForEach($draftTasks) { $draft in
-                HStack(spacing: 8) {
-                    TextField("무엇을 미리 해둘까요", text: $draft.title)
-
-                    Stepper(value: $draft.daysBefore, in: 0...365) {
-                        Text(draft.daysBefore == 0 ? "당일까지" : "\(draft.daysBefore)일 전까지")
+                SheetField(verticalPadding: 5) {
+                    HStack(spacing: 6) {
+                        TextField("무엇을 미리 해둘까요", text: $draft.title)
+                            .textFieldStyle(.plain)
                             .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .fixedSize()
 
-                    Button {
-                        draftTasks.removeAll { $0.id == draft.id }
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .foregroundStyle(.secondary)
+                        Stepper(value: $draft.daysBefore, in: 0...365) {
+                            Text(draft.daysBefore == 0 ? "당일" : "\(draft.daysBefore)일 전")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                        .fixedSize()
+
+                        Button {
+                            draftTasks.removeAll { $0.id == draft.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("이 줄 지우기")
                     }
-                    .buttonStyle(.borderless)
-                    .help("이 줄 지우기")
                 }
             }
 
@@ -236,6 +282,7 @@ struct EventEditorView: View {
                 draftTasks.append(DraftTask())
             } label: {
                 Label("할 일 추가", systemImage: "plus")
+                    .font(.caption)
             }
             .buttonStyle(.borderless)
         }
@@ -380,6 +427,7 @@ struct EventEditorView: View {
             )
             modelContext.insert(task)
         }
+        saver.commit(modelContext)
     }
 
     private func delete(span: EKSpan) {
