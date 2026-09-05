@@ -2,41 +2,96 @@
 //  DayDetailView.swift
 //  Startline
 //
-//  명세서 4.2 우측 — 선택된 날짜의 일정 목록.
+//  명세서 4.2 우측 — 「오늘 착수」 + 선택된 날짜의 일정 + TO-DO.
 //
 
+import Combine
 import EventKit
+import SwiftData
 import SwiftUI
 
 struct DayDetailView: View {
     let manager: CalendarManager
 
+    @Environment(\.modelContext) private var modelContext
+
+    // Phase 1 의 항목 수는 적어서 전체를 읽고 메모리에서 거른다.
+    @Query(sort: \ManagedTask.dueAt) private var allTasks: [ManagedTask]
+
+    /// 착수 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
+    @State private var now = Date()
+    @State private var editingTask: ManagedTask?
+    @State private var isAddingTask = false
+
+    private let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
     private var events: [DayEvent] {
         manager.events(on: manager.selectedDate)
     }
 
+    /// 선택된 날짜가 마감인 할 일.
+    private var tasksForSelectedDate: [ManagedTask] {
+        allTasks.filter {
+            manager.calendar.isDate($0.dueAt, inSameDayAs: manager.selectedDate)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 명세서 4.1 — 최상단 고정. 항목이 0개면 블록 자체가 사라진다.
+            TodayStartSection(tasks: allTasks, now: now) { task in
+                manager.selectedDate = manager.calendar.startOfDay(for: task.dueAt)
+                if !manager.isInDisplayedMonth(task.dueAt) {
+                    manager.setDisplayedMonth(task.dueAt)
+                    manager.selectedDate = manager.calendar.startOfDay(for: task.dueAt)
+                }
+            }
+
             header
             Divider()
 
-            if events.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("일정이 없습니다.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                List {
-                    ForEach(events) { dayEvent in
-                        EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+            List {
+                Section("일정") {
+                    if events.isEmpty {
+                        Text("일정이 없습니다.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(events) { dayEvent in
+                            EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                        }
                     }
                 }
-                .listStyle(.inset)
+
+                Section {
+                    TodoSectionContent(
+                        tasks: tasksForSelectedDate,
+                        now: now,
+                        onEdit: { editingTask = $0 },
+                        onDelete: delete
+                    )
+                } header: {
+                    HStack {
+                        Text("TO-DO")
+                        Spacer()
+                        Button {
+                            isAddingTask = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("할 일 추가")
+                    }
+                }
             }
+            .listStyle(.inset)
+        }
+        .onReceive(clock) { now = $0 }
+        .sheet(isPresented: $isAddingTask) {
+            TaskEditorView(task: nil, defaultDueDate: manager.selectedDate)
+        }
+        .sheet(item: $editingTask) { task in
+            TaskEditorView(task: task, defaultDueDate: task.dueAt)
         }
     }
 
@@ -44,13 +99,17 @@ struct DayDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(dateTitle)
                 .font(.title3.bold())
-            Text("일정 \(events.count)개")
+            Text("일정 \(events.count)개 · 할 일 \(tasksForSelectedDate.count)개")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private func delete(_ task: ManagedTask) {
+        modelContext.delete(task)
     }
 
     private var dateTitle: String {

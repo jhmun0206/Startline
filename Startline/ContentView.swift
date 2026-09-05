@@ -5,6 +5,7 @@
 //  Created by 문정환 on 9/5/26.
 //
 
+import SwiftData
 import SwiftUI
 
 struct ContentView: View {
@@ -101,4 +102,5 @@ private struct AccessDeniedView: View {
 
 #Preview {
     ContentView()
+        .modelContainer(for: ManagedTask.self, inMemory: true)
 }
