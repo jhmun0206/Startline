@@ -9,45 +9,6 @@
 import EventKit
 import SwiftUI
 
-/// 스냅 스크롤의 기준점.
-///
-/// `ScrollTargetBehavior` 는 값 타입이라 호출 사이에 상태를 남길 수 없다.
-/// 직전에 어느 달에 멈췄는지 알아야 "얼마나 끌었는지"를 잴 수 있어 참조 타입으로 따로 둔다.
-final class MonthScrollAnchor {
-    var settledY: CGFloat = 0
-}
-
-/// 명세서 7.1 원본 요구 — 스크롤 도중 다음 달이 화면의 6/7 이상 차지하면
-/// 손을 떼었을 때 그 달로 맞춰진다. 중간에 걸친 상태로는 멈추지 않는다.
-struct MonthSnapBehavior: ScrollTargetBehavior {
-    let anchor: MonthScrollAnchor
-    /// 다음 달로 넘어가는 기준. 6/7 ≈ 0.857
-    var threshold: CGFloat = 6.0 / 7.0
-
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        let page = context.containerSize.height
-        guard page > 0 else { return }
-
-        let startPage = (anchor.settledY / page).rounded()
-        // 관성까지 반영된 착지 지점을 기준으로 얼마나 넘어갔는지 잰다.
-        let travelled = (target.rect.minY - anchor.settledY) / page
-
-        var landing = startPage
-        if travelled >= threshold {
-            landing = startPage + 1
-        } else if travelled <= -threshold {
-            landing = startPage - 1
-        }
-
-        let lastPage = max(0, (context.contentSize.height / page).rounded() - 1)
-        landing = min(max(landing, 0), lastPage)
-
-        let settled = landing * page
-        target.rect.origin.y = settled
-        anchor.settledY = settled
-    }
-}
-
 struct MonthGridView: View {
     let manager: CalendarManager
     /// 그리드에서 일정을 클릭했을 때.
@@ -55,90 +16,27 @@ struct MonthGridView: View {
     /// 빈 곳을 더블클릭해 그 날짜로 새 항목을 만들 때.
     let onAddOnDate: (Date) -> Void
 
-    /// 스크롤로 오갈 수 있는 달의 범위. 앱을 켠 달 기준 앞뒤 2년.
-    @State private var months: [Date] = []
-    @State private var visibleMonth: Date?
-    @State private var anchor = MonthScrollAnchor()
-
     var body: some View {
         VStack(spacing: 0) {
-            MonthHeaderView(manager: manager) { month in
-                scroll(to: month)
-            }
+            MonthHeaderView(manager: manager)
             Divider()
             WeekdayHeaderView(headers: manager.weekdayHeaders())
             Divider()
-            monthPages
-        }
-        .onAppear(perform: buildMonths)
-        .onChange(of: visibleMonth) { _, newValue in
-            guard let newValue else { return }
-            manager.setDisplayedMonth(newValue)
+            grid
         }
     }
 
-    private var monthPages: some View {
-        GeometryReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(months, id: \.timeIntervalSinceReferenceDate) { month in
-                        MonthPage(
-                            manager: manager,
-                            month: month,
-                            onOpenEvent: onOpenEvent,
-                            onAddOnDate: onAddOnDate
-                        )
-                        .frame(height: proxy.size.height)
-                        .id(month)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(MonthSnapBehavior(anchor: anchor))
-            .scrollPosition(id: $visibleMonth)
-            .scrollIndicators(.never)
-        }
-    }
-
-    private func buildMonths() {
-        guard months.isEmpty else { return }
-
-        let base = CalendarManager.startOfMonth(for: Date(), calendar: manager.calendar)
-        months = (-24...24).compactMap {
-            manager.calendar.date(byAdding: .month, value: $0, to: base)
-        }
-        visibleMonth = CalendarManager.startOfMonth(
-            for: manager.displayedMonth,
-            calendar: manager.calendar
-        )
-        if let visibleMonth, let index = months.firstIndex(of: visibleMonth) {
-            anchor.settledY = CGFloat(index)  // 페이지 높이는 첫 스크롤 때 곱해진다
-        }
-    }
-
-    /// 이전/다음/오늘 버튼이 스크롤 위치를 옮긴다.
-    private func scroll(to month: Date) {
-        let target = CalendarManager.startOfMonth(for: month, calendar: manager.calendar)
-        guard months.contains(target) else { return }
-        withAnimation(.easeInOut(duration: 0.25)) {
-            visibleMonth = target
-        }
-    }
-}
-
-/// 한 달치 그리드. 스크롤 페이지 하나에 해당한다.
-private struct MonthPage: View {
-    let manager: CalendarManager
-    let month: Date
-    let onOpenEvent: (DayEvent) -> Void
-    let onAddOnDate: (Date) -> Void
-
-    var body: some View {
+    /// 표시 중인 한 달을 그린다.
+    ///
+    /// `manager.displayedMonth` 하나만 보고 그린다. 화면에 보이는 달과 머리글이
+    /// 어긋날 수 없도록 기준을 하나로 유지한다. (BL-002 실패 원인)
+    private var grid: some View {
         let calendar = manager.calendar
+        let month = manager.displayedMonth
         let dayEvents = manager.dayEvents(forMonth: month)
         let weeks = CalendarManager.gridDays(for: month, calendar: calendar).chunked(into: 7)
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
                 HStack(spacing: 0) {
                     ForEach(week, id: \.timeIntervalSinceReferenceDate) { day in
@@ -146,7 +44,7 @@ private struct MonthPage: View {
                             date: day,
                             dayNumber: calendar.component(.day, from: day),
                             events: dayEvents[calendar.startOfDay(for: day)] ?? [],
-                            isInMonth: calendar.isDate(day, equalTo: month, toGranularity: .month),
+                            isInMonth: manager.isInDisplayedMonth(day),
                             isToday: calendar.isDateInToday(day),
                             isSelected: calendar.isDate(day, inSameDayAs: manager.selectedDate),
                             onSelect: {
@@ -178,7 +76,6 @@ private struct MonthPage: View {
 
 private struct MonthHeaderView: View {
     let manager: CalendarManager
-    let onJump: (Date) -> Void
 
     @State private var isShowingCalendarList = false
 
@@ -189,9 +86,9 @@ private struct MonthHeaderView: View {
 
             // ‹ › 는 달 이름에 바로 붙여 같은 덩어리로 읽히게 한다.
             HStack(spacing: 2) {
-                Button { step(-1) } label: { Image(systemName: "chevron.left") }
+                Button { manager.goToPreviousMonth() } label: { Image(systemName: "chevron.left") }
                     .help("이전 달")
-                Button { step(1) } label: { Image(systemName: "chevron.right") }
+                Button { manager.goToNextMonth() } label: { Image(systemName: "chevron.right") }
                     .help("다음 달")
             }
             .buttonStyle(.borderless)
@@ -200,7 +97,6 @@ private struct MonthHeaderView: View {
             // 「오늘」은 성격이 다른 동작이라 간격을 두고 버튼처럼 보이게 한다.
             Button {
                 manager.goToToday()
-                onJump(Date())
             } label: {
                 Text("오늘")
                     .font(.callout)
@@ -247,13 +143,6 @@ private struct MonthHeaderView: View {
     }
 
     private var hasHiddenCalendars: Bool { !manager.hiddenCalendarIDs.isEmpty }
-
-    private func step(_ months: Int) {
-        guard let next = manager.calendar.date(
-            byAdding: .month, value: months, to: manager.displayedMonth
-        ) else { return }
-        onJump(next)
-    }
 
     private var monthTitle: String {
         Self.monthFormatter.string(from: manager.displayedMonth)
