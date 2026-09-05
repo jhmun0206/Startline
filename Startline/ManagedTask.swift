@@ -225,9 +225,11 @@ extension ManagedTask {
 
 // MARK: - 소요시간 프리셋 (명세서 12장 「소요시간 입력 마찰」 대응)
 
-/// 소요시간 입력 프리셋. 명세서 13장 #2 는 값이 미정이므로 아래는 잠정값이다.
-/// 「반나절 = 12시간 / 하루 = 24시간」— 착수일 = 마감시각 − 소요시간 공식을
-/// 달력 시간 그대로 해석한 것이다. (업무시간 기준 4/8시간이 아님)
+/// 소요시간 입력 프리셋.
+///
+/// 라벨에 실제 값을 그대로 드러낸다. 「반나절 / 하루」는 달력 시간(12/24시간)과
+/// 업무시간(4/8시간) 중 어느 쪽인지 사람마다 달리 읽어 착수마감이 크게 달라진다.
+/// 업무시간 기준으로 갈지는 명세서 13장 #2 로 열려 있다. (BL-012)
 struct DurationPreset: Identifiable {
     let label: String
     let duration: TimeInterval
@@ -238,8 +240,8 @@ struct DurationPreset: Identifiable {
         DurationPreset(label: "30분", duration: 30 * 60),
         DurationPreset(label: "1시간", duration: 60 * 60),
         DurationPreset(label: "3시간", duration: 3 * 60 * 60),
-        DurationPreset(label: "반나절", duration: 12 * 60 * 60),
-        DurationPreset(label: "하루", duration: 24 * 60 * 60),
+        DurationPreset(label: "12시간", duration: 12 * 60 * 60),
+        DurationPreset(label: "24시간", duration: 24 * 60 * 60),
     ]
 }
 
@@ -262,6 +264,37 @@ enum StartlineFormat {
         formatter.dateFormat = "yyyy년 M월 d일 (E) HH:mm"
         return formatter
     }()
+
+    /// "9월 27일 (일)"
+    static let spokenDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .startlineDisplay
+        formatter.dateFormat = "M월 d일 (E)"
+        return formatter
+    }()
+
+    /// "9월 27일 (일) 저녁 8시 59분" — 사람이 말하는 방식으로 시각을 적는다.
+    /// 명세서 5.4 — 남은 시간을 환산한 숫자는 넣지 않는다. 시점만 말한다.
+    static func spokenDayTime(_ date: Date, calendar: Calendar = .current) -> String {
+        let hour24 = calendar.component(.hour, from: date)
+        let minute = calendar.component(.minute, from: date)
+
+        let period: String
+        switch hour24 {
+        case 0..<6: period = "새벽"
+        case 6..<12: period = "아침"
+        case 12..<18: period = "오후"
+        case 18..<21: period = "저녁"
+        default: period = "밤"
+        }
+
+        let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
+        let time = minute == 0
+            ? "\(period) \(hour12)시"
+            : "\(period) \(hour12)시 \(minute)분"
+
+        return "\(spokenDay.string(from: date)) \(time)"
+    }
 
     /// 소요시간을 "1시간 30분" 형태로.
     static func duration(_ interval: TimeInterval) -> String {

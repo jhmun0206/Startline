@@ -2,8 +2,11 @@
 //  TaskEditorView.swift
 //  Startline
 //
-//  TO-DO 입력 시트. 제목 / 마감시각 / 소요시간 / 리드타임 방식.
-//  명세서 12장 「소요시간 입력 마찰」 — 프리셋 버튼으로 입력을 선택으로 바꾼다.
+//  TO-DO 입력 시트.
+//
+//  사용자에게 계산 방식을 고르라고 묻지 않는다. 사용자는 자기 상황만 말하고,
+//  리드타임 방식은 소요시간 입력 여부에서 자동으로 결정된다.
+//  명세서 12장 「소요시간 입력 마찰」 — 입력을 선택으로 바꾼다.
 //
 
 import SwiftData
@@ -19,12 +22,21 @@ struct TaskEditorView: View {
     /// 새로 만들 때의 기본 마감 날짜.
     let defaultDueDate: Date
 
+    /// 소요시간을 모를 때 고르는 대안.
+    private enum ReminderChoice: Hashable {
+        case threeDays
+        case oneWeek
+        case never
+    }
+
     @State private var title = ""
     @State private var dueAt = Date()
     @State private var hours = 0
     @State private var minutes = 0
-    @State private var leadTimeKind: LeadTimeKind = .durationBased
-    @State private var leadTimeValue = 1
+    @State private var reminderChoice: ReminderChoice?
+
+    /// UI로 표현할 수 없는 기존 리드타임(시간 단위 등)을 편집 중에 잃지 않도록 보관한다.
+    @State private var preservedLeadTime: LeadTime?
 
     private var isEditing: Bool { task != nil }
 
@@ -44,40 +56,28 @@ struct TaskEditorView: View {
             Form {
                 Section {
                     TextField("제목", text: $title)
-                    DatePicker(
-                        "마감시각",
-                        selection: $dueAt,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
                 }
 
-                Section("소요시간") {
+                Section("언제까지") {
+                    DatePicker("날짜", selection: $dueAt, displayedComponents: .date)
+                    DatePicker("시간", selection: $dueAt, displayedComponents: .hourAndMinute)
+                }
+                .environment(\.locale, .startlineDisplay)
+
+                Section("얼마나 걸릴까요") {
                     presetRow
                     manualRow
-                }
 
-                Section("리드타임 방식") {
-                    Picker("방식", selection: $leadTimeKind) {
-                        ForEach(LeadTimeKind.allCases, id: \.self) { kind in
-                            Text(kind.label).tag(kind)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-
-                    if leadTimeKind == .fixedDays || leadTimeKind == .fixedHours {
-                        Stepper(
-                            value: $leadTimeValue,
-                            in: 1...(leadTimeKind == .fixedDays ? 365 : 720)
-                        ) {
-                            Text(leadTimeKind == .fixedDays
-                                 ? "\(leadTimeValue)일 전"
-                                 : "\(leadTimeValue)시간 전")
-                        }
+                    if estimatedDuration == nil {
+                        reminderFallback
                     }
                 }
 
-                Section("착수마감") {
-                    startDeadlineSummary
+                if let deadline = startDeadline {
+                    Section("이때 시작해야 해요") {
+                        Text("\(StartlineFormat.spokenDayTime(deadline))에 시작해야 해요")
+                            .font(.callout)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -143,38 +143,56 @@ struct TaskEditorView: View {
         estimatedDuration == preset.duration
     }
 
-    // MARK: - 착수마감 미리보기
+    // MARK: - 소요시간을 모를 때
 
-    @ViewBuilder
-    private var startDeadlineSummary: some View {
-        let preview = ManagedTask(
+    /// 소요시간이 비어 있을 때만 나온다. 계산 방식을 묻는 대신
+    /// "며칠 전에 알려줄까"라는 사용자가 답할 수 있는 질문으로 바꾼다.
+    private var reminderFallback: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("얼마나 걸릴지 모르겠다면, 며칠 전에 알려드릴까요?")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                choiceButton("3일 전", .threeDays)
+                choiceButton("1주 전", .oneWeek)
+                choiceButton("알림 없음", .never)
+                Spacer()
+            }
+        }
+    }
+
+    private func choiceButton(_ label: String, _ choice: ReminderChoice) -> some View {
+        Button(label) {
+            reminderChoice = choice
+            preservedLeadTime = nil
+        }
+        .buttonStyle(.bordered)
+        .tint(reminderChoice == choice ? .accentColor : nil)
+    }
+
+    // MARK: - 리드타임 결정
+
+    /// 사용자에게 묻지 않고 결정한다.
+    /// 소요시간이 있으면 역산, 없으면 고른 대안, 아무것도 없으면 리드타임 없음.
+    private var currentLeadTime: LeadTime {
+        if estimatedDuration != nil { return .durationBased }
+
+        switch reminderChoice {
+        case .threeDays: return .fixed(days: 3)
+        case .oneWeek: return .fixed(days: 7)
+        case .never: return .none
+        case nil: return preservedLeadTime ?? .none
+        }
+    }
+
+    private var startDeadline: Date? {
+        ManagedTask(
             title: title,
             dueAt: dueAt,
             estimatedDuration: estimatedDuration,
             leadTime: currentLeadTime
-        )
-
-        if let deadline = preview.startDeadline() {
-            Text(StartlineFormat.fullDayTime.string(from: deadline))
-                .font(.system(.body, design: .monospaced))
-        } else if leadTimeKind == .durationBased {
-            Text("소요시간을 입력해야 착수마감이 계산됩니다.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } else {
-            Text("리드타임이 없어 착수마감을 계산하지 않습니다.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var currentLeadTime: LeadTime {
-        switch leadTimeKind {
-        case .durationBased: return .durationBased
-        case .fixedDays: return .fixed(days: leadTimeValue)
-        case .fixedHours: return .fixedHours(leadTimeValue)
-        case .none: return .none
-        }
+        ).startDeadline()
     }
 
     // MARK: - 로드 / 저장
@@ -191,13 +209,21 @@ struct TaskEditorView: View {
 
         title = task.title
         dueAt = task.dueAt
-        leadTimeKind = task.leadTimeKind
-        leadTimeValue = max(1, task.leadTimeValue)
 
         if let duration = task.estimatedDuration {
             let totalMinutes = Int(duration) / 60
             hours = totalMinutes / 60
             minutes = totalMinutes % 60
+        }
+
+        // 저장된 리드타임을 이 화면의 선택지로 되돌린다.
+        // 대응되는 선택지가 없으면(시간 단위 등) 원래 값을 그대로 보존한다.
+        switch task.leadTime {
+        case .fixed(days: 3): reminderChoice = .threeDays
+        case .fixed(days: 7): reminderChoice = .oneWeek
+        case .none: reminderChoice = .never
+        case .durationBased: reminderChoice = nil
+        default: preservedLeadTime = task.leadTime
         }
     }
 
