@@ -10,6 +10,12 @@ import EventKit
 import Foundation
 import Observation
 
+extension Locale {
+    /// 화면 표시 문자열에 쓰는 고정 로케일.
+    /// 시스템 캘린더 설정(주 시작 요일 등)은 그대로 따르되, 문자열만 한국어로 고정한다.
+    static let startlineDisplay = Locale(identifier: "ko_KR")
+}
+
 /// 앱 내부에서 다루는 캘린더 접근 권한 상태.
 /// EKAuthorizationStatus 를 3가지로 축약한다.
 enum CalendarAccessState {
@@ -30,6 +36,37 @@ struct WeekdayHeader: Identifiable {
     var id: Int { column }
 }
 
+/// 하루에 표시할 일정 한 건.
+///
+/// 같은 일정이 여러 캘린더에 중복 등록된 경우(예: 공휴일, 생일)를 한 건으로 묶는다.
+/// 묶는 기준은 같은 날 안에서 `종일 여부 + 시작시각 + 제목` 이 모두 같은 것.
+struct DayEvent: Identifiable {
+    let id: String
+    /// 묶인 원본 일정들. 최소 1건이며 캘린더명 순으로 정렬돼 있다.
+    let events: [EKEvent]
+
+    /// 대표 일정. 제목·시각·색상은 이 값을 쓴다.
+    var primary: EKEvent { events[0] }
+
+    /// 두 개 이상의 캘린더에 중복 등록된 일정인지.
+    var isDuplicated: Bool { events.count > 1 }
+
+    /// 이 일정이 등록된 캘린더 이름들 (중복 제거, 등장 순).
+    var calendarTitles: [String] {
+        var seen = Set<String>()
+        return events.compactMap { event in
+            let title = event.calendar?.title ?? "(캘린더 없음)"
+            return seen.insert(title).inserted ? title : nil
+        }
+    }
+
+    /// 중복 판정 키.
+    static func groupingKey(for event: EKEvent) -> String {
+        let start = event.startDate?.timeIntervalSinceReferenceDate ?? 0
+        return "\(event.isAllDay)|\(start)|\(event.title ?? "")"
+    }
+}
+
 @Observable
 final class CalendarManager {
 
@@ -40,11 +77,12 @@ final class CalendarManager {
     /// 접근 가능한 전체 캘린더 (이름 + 소스명 표시용).
     private(set) var calendars: [EKCalendar] = []
 
-    /// 현재 읽어둔 범위의 일정 전체. 시작시각 오름차순.
+    /// 현재 읽어둔 범위의 원본 일정 전체. 중복 제거 이전 상태.
     private(set) var events: [EKEvent] = []
 
-    /// 날짜(자정 기준) → 그 날에 걸치는 일정. 여러 날에 걸친 일정은 각 날에 모두 들어간다.
-    private(set) var eventsByDay: [Date: [EKEvent]] = [:]
+    /// 날짜(자정 기준) → 그 날에 표시할 일정.
+    /// 여러 날에 걸친 일정은 각 날에 모두 들어가고, 캘린더 간 중복은 한 건으로 묶인다.
+    private(set) var eventsByDay: [Date: [DayEvent]] = [:]
 
     /// 그리드가 표시 중인 달. 항상 그 달 1일 00:00.
     private(set) var displayedMonth: Date
@@ -66,7 +104,11 @@ final class CalendarManager {
     let calendar: Calendar
 
     init(calendar: Calendar = .current, now: Date = Date()) {
+        var calendar = calendar
+        // 주 시작 요일 같은 시스템 설정은 유지하고, 요일·월 이름만 한국어로 고정한다.
+        calendar.locale = .startlineDisplay
         self.calendar = calendar
+
         self.displayedMonth = Self.startOfMonth(for: now, calendar: calendar)
         self.selectedDate = calendar.startOfDay(for: now)
 
@@ -205,8 +247,8 @@ final class CalendarManager {
         loadedRange = (start, end)
     }
 
-    /// 특정 날짜에 걸치는 일정.
-    func events(on date: Date) -> [EKEvent] {
+    /// 특정 날짜에 표시할 일정 (캘린더 간 중복 제거됨).
+    func events(on date: Date) -> [DayEvent] {
         eventsByDay[calendar.startOfDay(for: date)] ?? []
     }
 
@@ -254,13 +296,13 @@ final class CalendarManager {
 
     // MARK: - 일자별 분류
 
-    /// 여러 날에 걸친 일정을 각 날짜 버킷에 모두 넣는다.
+    /// 여러 날에 걸친 일정을 각 날짜 버킷에 모두 넣고, 날짜별로 중복을 묶는다.
     private func bucketByDay(
         _ events: [EKEvent],
         rangeStart: Date,
         rangeEnd: Date
-    ) -> [Date: [EKEvent]] {
-        var result: [Date: [EKEvent]] = [:]
+    ) -> [Date: [DayEvent]] {
+        var raw: [Date: [EKEvent]] = [:]
 
         for event in events {
             guard let start = event.startDate else { continue }
@@ -276,16 +318,33 @@ final class CalendarManager {
             let lastDay = calendar.startOfDay(for: min(end, rangeEnd))
 
             while day <= lastDay {
-                result[day, default: []].append(event)
+                raw[day, default: []].append(event)
                 guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
                 day = next
             }
         }
 
-        for (day, dayEvents) in result {
-            result[day] = dayEvents.sorted(by: Self.isOrderedBefore)
+        return raw.mapValues { Self.groupDuplicates($0.sorted(by: Self.isOrderedBefore)) }
+    }
+
+    /// 같은 제목·같은 시작시각의 일정을 한 건으로 묶는다.
+    /// 입력 순서를 유지하므로 정렬된 배열을 넘겨야 한다.
+    private static func groupDuplicates(_ events: [EKEvent]) -> [DayEvent] {
+        var order: [String] = []
+        var groups: [String: [EKEvent]] = [:]
+
+        for event in events {
+            let key = DayEvent.groupingKey(for: event)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(event)
         }
-        return result
+
+        return order.compactMap { key in
+            guard let group = groups[key], !group.isEmpty else { return nil }
+            // 대표 일정이 매번 같도록 캘린더명으로 정렬한다.
+            let sorted = group.sorted { ($0.calendar?.title ?? "") < ($1.calendar?.title ?? "") }
+            return DayEvent(id: key, events: sorted)
+        }
     }
 
     /// 종일 일정 우선, 그 다음 시작시각, 그 다음 제목.

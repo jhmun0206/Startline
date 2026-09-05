@@ -102,11 +102,15 @@ private struct MonthHeaderView: View {
     }
 
     private var monthTitle: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.setLocalizedDateFormatFromTemplate("yMMMM")
-        return formatter.string(from: manager.displayedMonth)
+        Self.monthFormatter.string(from: manager.displayedMonth)
     }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .startlineDisplay
+        formatter.dateFormat = "yyyy년 M월"
+        return formatter
+    }()
 }
 
 /// 접근 가능한 전체 캘린더 목록 — 이름 + 소속 소스명.
@@ -166,7 +170,7 @@ private struct WeekdayHeaderView: View {
 private struct DayCell: View {
     let date: Date
     let dayNumber: Int
-    let events: [EKEvent]
+    let events: [DayEvent]
     let isInMonth: Bool
     let isToday: Bool
     let isSelected: Bool
@@ -184,8 +188,8 @@ private struct DayCell: View {
                 dayNumberView
                     .frame(height: Self.numberRowHeight)
 
-                ForEach(Array(visibleEvents(capacity: capacity).enumerated()), id: \.offset) { _, event in
-                    EventBar(event: event, isDimmed: !isInMonth)
+                ForEach(visibleEvents(capacity: capacity)) { dayEvent in
+                    EventBar(dayEvent: dayEvent, isDimmed: !isInMonth)
                         .frame(height: Self.barHeight)
                 }
 
@@ -247,7 +251,7 @@ private struct DayCell: View {
     }
 
     /// 전부 들어가면 전부, 넘치면 "+N" 자리를 한 칸 비워둔다.
-    private func visibleEvents(capacity: Int) -> [EKEvent] {
+    private func visibleEvents(capacity: Int) -> [DayEvent] {
         guard events.count > capacity else { return events }
         return Array(events.prefix(max(0, capacity - 1)))
     }
@@ -260,14 +264,15 @@ private struct DayCell: View {
 }
 
 /// 일정 한 건을 나타내는 색상 바. 제목이 바 안에 직접 보인다.
+/// 칸이 좁으므로 시각은 넣지 않는다. 시각은 우측 상세 패널에서 본다.
 private struct EventBar: View {
-    let event: EKEvent
+    let dayEvent: DayEvent
     let isDimmed: Bool
 
     var body: some View {
-        let color = event.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray
+        let color = dayEvent.primary.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray
 
-        Text(label)
+        Text(title)
             .font(.system(size: 10, weight: .medium))
             .lineLimit(1)
             .truncationMode(.tail)
@@ -278,21 +283,17 @@ private struct EventBar: View {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(color.opacity(isDimmed ? 0.35 : 0.9))
             )
-            .help(label)
+            .help(helpText)
     }
 
-    private var label: String {
-        let title = event.title ?? "(제목 없음)"
-        guard !event.isAllDay, let start = event.startDate else { return title }
-        return "\(Self.timeFormatter.string(from: start)) \(title)"
+    private var title: String {
+        dayEvent.primary.title ?? "(제목 없음)"
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.setLocalizedDateFormatFromTemplate("Hm")
-        return formatter
-    }()
+    private var helpText: String {
+        guard dayEvent.isDuplicated else { return title }
+        return "\(title) — \(dayEvent.calendarTitles.joined(separator: ", "))"
+    }
 }
 
 // MARK: - 보조

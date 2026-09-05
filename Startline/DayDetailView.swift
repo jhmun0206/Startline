@@ -11,7 +11,7 @@ import SwiftUI
 struct DayDetailView: View {
     let manager: CalendarManager
 
-    private var events: [EKEvent] {
+    private var events: [DayEvent] {
         manager.events(on: manager.selectedDate)
     }
 
@@ -31,8 +31,8 @@ struct DayDetailView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 List {
-                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in
-                        EventRow(event: event, day: manager.selectedDate)
+                    ForEach(events) { dayEvent in
+                        EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                     }
                 }
                 .listStyle(.inset)
@@ -54,18 +54,24 @@ struct DayDetailView: View {
     }
 
     private var dateTitle: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.setLocalizedDateFormatFromTemplate("yMMMdEEEE")
-        return formatter.string(from: manager.selectedDate)
+        Self.dateFormatter.string(from: manager.selectedDate)
     }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .startlineDisplay
+        formatter.dateFormat = "yyyy년 M월 d일 (E)"
+        return formatter
+    }()
 }
 
 /// 일정 한 행 — [시각] [제목] [소속 캘린더명]
 struct EventRow: View {
-    let event: EKEvent
+    let dayEvent: DayEvent
     /// 이 행이 놓인 날짜. 여러 날에 걸친 일정의 시각 표기에 쓴다.
     let day: Date
+
+    private var event: EKEvent { dayEvent.primary }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -89,12 +95,27 @@ struct EventRow: View {
                         .lineLimit(1)
                 }
 
-                Text(event.calendar?.title ?? "(캘린더 없음)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                calendarLabel
             }
         }
         .padding(.vertical, 4)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// 중복 등록된 일정은 어느 캘린더들에 있는지 모두 보여준다.
+    private var calendarLabel: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(dayEvent.events.enumerated()), id: \.offset) { _, source in
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(source.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
+                        .frame(width: 6, height: 6)
+                    Text(source.calendar?.title ?? "(캘린더 없음)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -116,8 +137,8 @@ struct EventRow: View {
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.setLocalizedDateFormatFromTemplate("Hm")
+        formatter.locale = .startlineDisplay
+        formatter.dateFormat = "HH:mm"
         return formatter
     }()
 }
