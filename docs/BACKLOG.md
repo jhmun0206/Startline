@@ -158,7 +158,8 @@
 
 - **우선순위:** P3
 - **Phase:** 2
-- **배경:** 명세서 5.1을 그대로 옮기면서 만든 필드 중 셋이 아직 아무 데서도 채워지지 않는다. `referenceDuration`(AI·과거기록 참고값, 7.3의 2열 화면), `linkedEventID`(EventKit 일정 연결), `status == .missed`(6.4 규칙 기반 놓침 감지). 모델을 먼저 맞춰두는 편이 마이그레이션에 유리해 필드만 두었다.
+- **배경:** 명세서를 그대로 옮기면서 만든 필드 중 일부가 아직 아무 데서도 채워지지 않는다. `referenceDuration`(AI·과거기록 참고값, v0.3 10장의 2열 화면), `status == .missed`(v0.3 9.4 규칙 기반 놓침 감지). 모델을 먼저 맞춰두는 편이 마이그레이션에 유리해 필드만 두었다.
+- **2026-09-05 갱신:** `linkedEventID` 는 v0.3 7장 구현에서 `parentEventID` + `offsetFromParent` 로 대체되어 **실제로 쓰이게 되었다.** 남은 미사용 필드는 `referenceDuration` 과 `.missed` 둘뿐이다.
 - **발생 위치:** [ManagedTask.swift](../Startline/ManagedTask.swift)
 - **해결 방향:** 각각 Phase 2 해당 기능에서 채운다. 그전까지 `referenceDuration` 이 착수일 계산에 절대 끼어들지 않아야 한다 — 계산은 `estimatedDuration` 만 쓴다. (명세서 원칙 1, 5.1)
 - **등록일:** 2026-09-05
@@ -189,6 +190,42 @@
 - **배경:** 할 일 입력 시트에서 리드타임 방식을 고르는 선택을 없앴다. 사용자에게 계산 방식을 물으면 판단 근거가 없어 답할 수 없기 때문이다. 그 결과 리드타임은 소요시간 입력 여부로 자동 결정되고(`durationBased`), 소요시간을 모를 때만 `3일 전 / 1주 전 / 알림 없음` 중에서 고른다. **`fixedHours` 는 어느 경로로도 만들 수 없다.** 모델과 계산 엔진에는 그대로 남아 있고 동작도 검증돼 있다.
 - **발생 위치:** [TaskEditorView.swift](../Startline/TaskEditorView.swift) — `ReminderChoice`, `currentLeadTime` / [ManagedTask.swift](../Startline/ManagedTask.swift) — `LeadTime.fixedHours`
 - **해결 방향:** 노출할지 자체가 미정이다. "N시간 전"이 필요한 상황은 대체로 소요시간을 아는 상황이라 `durationBased` 로 덮인다고 보고 일단 뺐다. 2주 사용에서 시간 단위가 실제로 아쉬우면 대안 선택지에 `3시간 전` 같은 항목을 더한다. 기존 데이터에 `fixedHours` 가 남아 있을 수 있어, 편집 시트는 표현할 수 없는 리드타임을 덮어쓰지 않고 그대로 보존한다(`preservedLeadTime`).
+- **등록일:** 2026-09-05
+
+### BL-019 · 반복 일정 회차 특정이 부모 이동에 취약함
+
+- **우선순위:** P2
+- **Phase:** 1
+- **배경:** `EKEvent.eventIdentifier` 는 반복 일정의 회차 간에 동일하므로, 회차를 특정하려고 `parentOccurrenceDate`(붙일 당시의 회차 시작시각)를 함께 저장한다. 조회 시에는 그 시각 ±45일 창에서 같은 식별자를 가진 회차 중 **가장 가까운 것**을 고른다. 회차가 그 창을 벗어나 크게 옮겨지거나, 두 회차가 서로 가까이 붙어 있으면 엉뚱한 회차를 고를 수 있다.
+- **발생 위치:** [CalendarManager.swift](../Startline/CalendarManager.swift) — `lookUpParentEvent(id:occurrenceDate:)`
+- **해결 방향:** 단일 일정은 식별자 조회만으로 정확하므로 이 문제는 반복 일정에만 해당한다. 명세서 8.3이 반복 일정 리드타임 기본값을 「미적용」으로 두고 있어 당장은 노출이 적다. Phase 2에서 반복 일정을 정식 지원할 때, 회차 이동을 따라가는 대신 **회차를 붙일 때 그 시점의 실효마감을 확정 저장하고 부모 추적을 끊는** 선택지도 함께 검토한다.
+- **등록일:** 2026-09-05
+
+### BL-020 · 부모 일정 연결 상태 정리 시점이 화면에 묶여 있음
+
+- **우선순위:** P2
+- **Phase:** 1
+- **배경:** 부모 이동 반영과 부모 삭제 감지(`TaskLinkMaintenance.sync`)를 우측 패널이 뜰 때와 월이 바뀔 때만 돌린다. 뷰 본문에서 저장을 일으키지 않으려고 호출 시점을 명시적으로 제한한 결과다. **앱을 켜둔 채 캘린더에서 부모 일정을 지우면, 월을 옮기거나 앱을 다시 열기 전까지 전환이 일어나지 않는다.**
+- **발생 위치:** [DayDetailView.swift](../Startline/DayDetailView.swift) — `syncLinks()` / [TaskResolution.swift](../Startline/TaskResolution.swift) — `TaskLinkMaintenance.sync`
+- **해결 방향:** BL-006(`EKEventStoreChanged` 미구독)과 같은 뿌리다. 변경 알림을 구독하면 부모 삭제·이동을 즉시 감지해 이 함수를 돌릴 수 있다. 둘을 함께 처리한다. 알림(BL-010)을 붙이면 잘못된 시각에 알림이 갈 수 있으므로 그 전에 정리하는 편이 낫다.
+- **등록일:** 2026-09-05
+
+### BL-021 · 「일정에 맞춰」의 부모 후보 범위가 고정값
+
+- **우선순위:** P3
+- **Phase:** 1
+- **배경:** 할 일 추가 시트에서 부모로 고를 수 있는 일정은 선택 날짜 기준 **이전 7일 ~ 이후 60일** 범위로 고정돼 있다. 그 밖의 일정에는 할 일을 붙일 수 없다. 목록이 너무 길어지지 않게 잡은 잠정값이다.
+- **발생 위치:** [CalendarManager.swift](../Startline/CalendarManager.swift) — `candidateEvents(around:daysBefore:daysAfter:)` 기본 인자
+- **해결 방향:** 실사용에서 범위 밖 일정에 붙이려는 상황이 나오면 검색창을 붙인다. 편집 시에는 범위 밖 부모라도 목록 맨 앞에 끼워 넣어 연결이 끊기지 않게 이미 처리돼 있다.
+- **등록일:** 2026-09-05
+
+### BL-022 · 부모 일정 기준 상대 마감이 일 단위 캘린더 연산이 아님
+
+- **우선순위:** P3
+- **Phase:** 1
+- **배경:** `offsetFromParent` 는 명세서 4.1이 `TimeInterval` 로 규정해, "5일 전"을 `-5 × 86400초` 로 저장한다. 반면 리드타임의 `fixed(days:)` 는 서머타임을 고려해 캘린더 연산을 쓴다. 두 경로의 기준이 다르다. 한국 시간대는 서머타임이 없어 현재는 차이가 나지 않는다.
+- **발생 위치:** [TaskEditorView.swift](../Startline/TaskEditorView.swift) — `offsetFromParent`
+- **해결 방향:** 해외 사용자를 받게 되면 드러난다. 저장 형식을 유지한 채 조회 시점에 캘린더 연산으로 환산하거나, 일수를 별도 필드로 저장한다. 명세서 모델을 바꾸는 일이라 명세서 개정과 함께 다룬다.
 - **등록일:** 2026-09-05
 
 ---

@@ -100,6 +100,12 @@ final class CalendarManager {
 
     private let eventStore = EKEventStore()
 
+    /// 부모 일정 조회 캐시. (명세서 7.4 — 매번 EventKit을 때리지 않는다)
+    ///
+    /// 관찰 대상에서 빼둔다. 화면을 그리는 도중에 조회가 일어나도 뷰 갱신을 유발하지 않아야 하고,
+    /// 캐시 자체는 화면에 보이는 상태가 아니다. 값에 `nil` 을 담아 "찾지 못함"도 캐시한다.
+    @ObservationIgnored private var parentEventCache: [String: EKEvent?] = [:]
+
     /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
     let calendar: Calendar
 
@@ -245,6 +251,72 @@ final class CalendarManager {
         events = eventStore.events(matching: predicate).sorted(by: Self.isOrderedBefore)
         eventsByDay = bucketByDay(events, rangeStart: start, rangeEnd: end)
         loadedRange = (start, end)
+
+        // 일정을 다시 읽었으면 부모 조회 결과도 낡았다.
+        parentEventCache.removeAll()
+    }
+
+    // MARK: - 부모 일정 조회 (명세서 7.4)
+
+    /// 할 일에 붙은 부모 일정을 찾는다. 결과는 다음 일정 로드 때까지 캐시된다.
+    ///
+    /// - Parameters:
+    ///   - id: `EKEvent.eventIdentifier`
+    ///   - occurrenceDate: 반복 일정일 때 특정할 회차의 원래 시작시각.
+    /// - Returns: 부모 일정. 삭제됐으면 `nil`.
+    func parentEvent(id: String, occurrenceDate: Date?) -> EKEvent? {
+        guard accessState == .authorized else { return nil }
+
+        let key = "\(id)|\(occurrenceDate?.timeIntervalSinceReferenceDate ?? 0)"
+        if let cached = parentEventCache[key] { return cached }
+
+        let resolved = lookUpParentEvent(id: id, occurrenceDate: occurrenceDate)
+        parentEventCache[key] = resolved
+        return resolved
+    }
+
+    private func lookUpParentEvent(id: String, occurrenceDate: Date?) -> EKEvent? {
+        // 단일 일정은 식별자 조회로 끝난다. 일정이 옮겨졌어도 새 시작시각이 그대로 나온다.
+        let base = eventStore.event(withIdentifier: id)
+
+        // 반복 일정은 식별자가 회차 간에 같으므로, 저장해 둔 회차 시각 주변을 훑어 특정한다.
+        guard let occurrenceDate, base?.hasRecurrenceRules == true else { return base }
+
+        let window: TimeInterval = 45 * 24 * 60 * 60
+        let predicate = eventStore.predicateForEvents(
+            withStart: occurrenceDate.addingTimeInterval(-window),
+            end: occurrenceDate.addingTimeInterval(window),
+            calendars: nil
+        )
+
+        // 회차가 옮겨졌을 수 있으므로 원래 시각에 가장 가까운 회차를 고른다.
+        let occurrences = eventStore.events(matching: predicate)
+            .filter { $0.eventIdentifier == id }
+
+        return occurrences.min {
+            let l = abs(($0.startDate ?? .distantPast).timeIntervalSince(occurrenceDate))
+            let r = abs(($1.startDate ?? .distantPast).timeIntervalSince(occurrenceDate))
+            return l < r
+        } ?? base
+    }
+
+    /// 부모로 고를 수 있는 일정 후보. 그리드 표시 상태를 건드리지 않는다.
+    ///
+    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (6.2와 같은 기준)
+    func candidateEvents(around date: Date, daysBefore: Int = 7, daysAfter: Int = 60) -> [EKEvent] {
+        guard accessState == .authorized else { return [] }
+
+        let anchor = calendar.startOfDay(for: date)
+        guard let start = calendar.date(byAdding: .day, value: -daysBefore, to: anchor),
+              let end = calendar.date(byAdding: .day, value: daysAfter, to: anchor)
+        else { return [] }
+
+        let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
+
+        var seen = Set<String>()
+        return eventStore.events(matching: predicate)
+            .sorted(by: Self.isOrderedBefore)
+            .filter { seen.insert(DayEvent.groupingKey(for: $0)).inserted }
     }
 
     /// 특정 날짜에 표시할 일정 (캘린더 간 중복 제거됨).

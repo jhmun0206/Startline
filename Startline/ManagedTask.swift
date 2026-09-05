@@ -81,7 +81,24 @@ final class ManagedTask {
 
     var id: UUID = UUID()
     var title: String = ""
-    var dueAt: Date = Date()
+
+    // ─── 마감 (명세서 4.1) ───
+
+    /// 절대 마감. 독립 할 일이 쓴다.
+    ///
+    /// 부모 일정이 붙은 할 일에서는 **마지막으로 계산된 실효마감의 사본**을 여기 보관한다.
+    /// 부모 일정이 삭제됐을 때 이 값을 확정 마감으로 승격시켜 독립 할 일로 전환한다. (명세서 4.2)
+    var dueAt: Date?
+
+    /// 부모 일정. `EKEvent.eventIdentifier`.
+    var parentEventID: String?
+
+    /// 반복 일정의 회차 특정용. `EKEvent.eventIdentifier` 는 회차별로 같을 수 있다. (명세서 7.4)
+    var parentOccurrenceDate: Date?
+
+    /// 부모 일정 시작시각 기준 상대 마감. 음수가 "며칠 전".
+    /// 절대 시각이 아니라 상대값으로 저장해야 부모가 옮겨질 때 함께 따라간다. (명세서 7.3)
+    var offsetFromParent: TimeInterval?
 
     /// 사용자가 입력한 소요시간. **앱이 임의로 변형하지 않는다.** (명세서 원칙 1)
     /// 착수일 계산에는 항상 이 값만 쓴다.
@@ -95,18 +112,17 @@ final class ManagedTask {
     var leadTimeKind: LeadTimeKind = LeadTimeKind.durationBased
     var leadTimeValue: Int = 0
 
-    var linkedEventID: String?
     var status: TaskStatus = TaskStatus.notStarted
     var startedAt: Date?
     var completedAt: Date?
     var createdAt: Date = Date()
 
+    /// 독립 할 일.
     init(
         title: String,
-        dueAt: Date,
+        dueAt: Date?,
         estimatedDuration: TimeInterval? = nil,
-        leadTime: LeadTime = .durationBased,
-        linkedEventID: String? = nil
+        leadTime: LeadTime = .durationBased
     ) {
         self.id = UUID()
         self.title = title
@@ -115,7 +131,31 @@ final class ManagedTask {
         self.referenceDuration = nil
         self.leadTimeKind = .durationBased
         self.leadTimeValue = 0
-        self.linkedEventID = linkedEventID
+        self.status = .notStarted
+        self.createdAt = Date()
+        self.leadTime = leadTime
+    }
+
+    /// 일정에 딸린 할 일. 마감을 부모 기준 상대값으로 저장한다. (명세서 7.2)
+    init(
+        title: String,
+        parentEventID: String,
+        parentOccurrenceDate: Date?,
+        offsetFromParent: TimeInterval,
+        lastKnownDueAt: Date?,
+        estimatedDuration: TimeInterval? = nil,
+        leadTime: LeadTime = .durationBased
+    ) {
+        self.id = UUID()
+        self.title = title
+        self.dueAt = lastKnownDueAt
+        self.parentEventID = parentEventID
+        self.parentOccurrenceDate = parentOccurrenceDate
+        self.offsetFromParent = offsetFromParent
+        self.estimatedDuration = estimatedDuration
+        self.referenceDuration = nil
+        self.leadTimeKind = .durationBased
+        self.leadTimeValue = 0
         self.status = .notStarted
         self.createdAt = Date()
         self.leadTime = leadTime
@@ -150,61 +190,83 @@ final class ManagedTask {
     }
 }
 
-// MARK: - 착수일 계산 (명세서 5.2)
+// MARK: - 마감 결정과 착수일 계산 (명세서 4.2, 4.3)
 
 extension ManagedTask {
 
-    /// 착수마감 = 마감시각 − 리드타임.
+    /// 일정에 딸린 할 일인지.
+    var isAttached: Bool { parentEventID != nil }
+
+    /// 실효마감. (명세서 4.2)
     ///
-    /// **버퍼 배수를 곱하지 않는다.** (명세서 원칙 1, 5.2)
+    /// 부모 일정이 있으면 `부모 시작시각 + offsetFromParent`, 없으면 `dueAt`.
+    /// 부모가 있으나 아직 찾지 못한 경우에는 마지막으로 확정된 `dueAt` 으로 물러선다.
+    ///
+    /// - Parameter parentStart: 부모 일정의 시작시각. 부모를 못 찾았으면 `nil`.
+    func effectiveDueAt(parentStart: Date?) -> Date? {
+        guard isAttached else { return dueAt }
+        guard let parentStart, let offsetFromParent else { return dueAt }
+        return parentStart.addingTimeInterval(offsetFromParent)
+    }
+
+    /// 착수마감 = 실효마감 − 리드타임. (명세서 4.3)
+    ///
+    /// **버퍼 배수를 곱하지 않는다.** (원칙 1)
     /// 사용자가 입력한 `estimatedDuration` 을 그대로 뺀다.
-    ///
-    /// - Returns: 리드타임이 없거나 소요시간 역산인데 소요시간이 비어 있으면 `nil`.
-    func startDeadline(calendar: Calendar = .current) -> Date? {
+    func startDeadline(effectiveDueAt: Date?, calendar: Calendar = .current) -> Date? {
+        guard let due = effectiveDueAt else { return nil }
+
         switch leadTime {
         case .durationBased:
             guard let estimatedDuration, estimatedDuration > 0 else { return nil }
-            return dueAt.addingTimeInterval(-estimatedDuration)
+            return due.addingTimeInterval(-estimatedDuration)
 
         case .fixed(let days):
             // 일 단위는 캘린더 연산으로 뺀다. 서머타임 등에서 하루가 24시간이 아닐 수 있다.
-            return calendar.date(byAdding: .day, value: -days, to: dueAt)
+            return calendar.date(byAdding: .day, value: -days, to: due)
 
         case .fixedHours(let hours):
-            return calendar.date(byAdding: .hour, value: -hours, to: dueAt)
+            return calendar.date(byAdding: .hour, value: -hours, to: due)
 
         case .none:
             return nil
         }
     }
 
+    /// 저장된 `dueAt` 만으로 계산하는 편의 메서드.
+    ///
+    /// 독립 할 일에서는 정확하다. 부모가 붙은 할 일에서는 마지막으로 확정된 값을 쓰므로,
+    /// 부모를 조회할 수 있는 자리에서는 `startDeadline(effectiveDueAt:calendar:)` 를 쓴다.
+    func startDeadline(calendar: Calendar = .current) -> Date? {
+        startDeadline(effectiveDueAt: dueAt, calendar: calendar)
+    }
+
     /// 착수 판정. 숫자가 아니라 판정만 돌려준다. (명세서 5.4)
     ///
     /// 아직 시작하지 않은 항목에 대해서만 의미가 있다.
     /// 이미 시작했거나 완료한 항목, 리드타임이 없는 항목은 `nil`.
-    func judgment(now: Date = Date(), calendar: Calendar = .current) -> StartJudgment? {
+    func judgment(
+        effectiveDueAt: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> StartJudgment? {
         guard status == .notStarted else { return nil }
-        guard let deadline = startDeadline(calendar: calendar) else { return nil }
+        guard let deadline = startDeadline(effectiveDueAt: effectiveDueAt, calendar: calendar) else { return nil }
 
-        // 착수마감이 지났으면 지연. (명세서 5.3 위험 단계)
+        // 착수마감이 지났으면 지연. (명세서 8.1 위험 단계)
         if now > deadline { return .overdue }
-        // 오늘이 착수마감이면 오늘 착수. (명세서 5.3 착수 단계)
+        // 오늘이 착수마감이면 오늘 착수. (명세서 8.1 착수 단계)
         if calendar.isDate(deadline, inSameDayAs: now) { return .startToday }
         return .relaxed
     }
 
-    /// 명세서 4.1 「오늘 착수」 영역에 들어갈 항목인지.
-    /// 오늘이 착수마감인 것, 그리고 착수마감이 지났는데 아직 시작하지 않은 것.
-    func needsStartAttention(now: Date = Date(), calendar: Calendar = .current) -> Bool {
-        switch judgment(now: now, calendar: calendar) {
-        case .startToday, .overdue: return true
-        case .relaxed, nil: return false
-        }
+    func judgment(now: Date = Date(), calendar: Calendar = .current) -> StartJudgment? {
+        judgment(effectiveDueAt: dueAt, now: now, calendar: calendar)
     }
 
     // MARK: - 상태 전이
 
-    /// "지금 시작" — 이 기록이 명세서 6장 캘리브레이션의 입력이 된다.
+    /// "지금 시작" — 이 기록이 명세서 9장 캘리브레이션의 입력이 된다.
     func markStarted(at date: Date = Date()) {
         guard status == .notStarted || status == .missed else { return }
         status = .inProgress
@@ -220,6 +282,19 @@ extension ManagedTask {
         status = .notStarted
         startedAt = nil
         completedAt = nil
+    }
+
+    // MARK: - 부모 연결 해제 (명세서 4.2)
+
+    /// 부모 일정이 삭제됐을 때 독립 할 일로 전환한다.
+    ///
+    /// 할 일을 함께 지우지 않는다. 준비 작업 자체는 여전히 유효할 수 있다.
+    /// 마지막으로 계산된 실효마감을 확정 마감으로 승격시킨다.
+    func detachFromParent(lastKnownDueAt: Date?) {
+        if let lastKnownDueAt { dueAt = lastKnownDueAt }
+        parentEventID = nil
+        parentOccurrenceDate = nil
+        offsetFromParent = nil
     }
 }
 

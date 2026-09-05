@@ -15,19 +15,18 @@ import SwiftUI
 /// 사용자가 이미 아는 오늘 일정보다, 모르고 있는 착수 항목이 위에 와야 한다.
 /// **항목이 0개면 이 블록 자체가 사라진다.**
 struct TodayStartSection: View {
-    let tasks: [ManagedTask]
-    let now: Date
-    let onSelect: (ManagedTask) -> Void
+    let tasks: [ResolvedTask]
+    let onSelect: (ResolvedTask) -> Void
 
     /// 오늘이 착수마감인 항목 + 착수마감이 지났는데 미시작인 항목.
-    private var attentionTasks: [ManagedTask] {
+    private var attentionTasks: [ResolvedTask] {
         tasks
-            .filter { $0.needsStartAttention(now: now) }
+            .filter(\.needsStartAttention)
             .sorted { lhs, rhs in
-                let l = lhs.startDeadline() ?? .distantFuture
-                let r = rhs.startDeadline() ?? .distantFuture
+                let l = lhs.startDeadline ?? .distantFuture
+                let r = rhs.startDeadline ?? .distantFuture
                 if l != r { return l < r }
-                return lhs.title < rhs.title
+                return lhs.task.title < rhs.task.title
             }
     }
 
@@ -38,18 +37,19 @@ struct TodayStartSection: View {
                     .font(.caption.bold())
                     .foregroundStyle(.orange)
 
-                ForEach(attentionTasks) { task in
+                ForEach(attentionTasks) { resolved in
                     HStack(spacing: 6) {
-                        Text(task.title)
+                        // "회의 장소 연락 → GDG 미팅" — 부모가 붙으면 맥락을 함께 보여준다.
+                        Text(resolved.contextualTitle)
                             .font(.callout)
                             .lineLimit(1)
                         Spacer(minLength: 6)
-                        if let judgment = task.judgment(now: now) {
+                        if let judgment = resolved.judgment {
                             JudgmentBadge(judgment: judgment)
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { onSelect(task) }
+                    .onTapGesture { onSelect(resolved) }
                 }
             }
             .padding(.horizontal, 16)
@@ -88,13 +88,20 @@ struct JudgmentBadge: View {
 // MARK: - TO-DO 행
 
 struct TaskRow: View {
-    let task: ManagedTask
-    let now: Date
+    let resolved: ResolvedTask
+    /// 일정 아래에 딸린 할 일이면 들여쓴다.
+    var isNested = false
     let onEdit: () -> Void
     let onDelete: () -> Void
 
+    private var task: ManagedTask { resolved.task }
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            if isNested {
+                Spacer().frame(width: 14)
+            }
+
             Button {
                 toggleDone()
             } label: {
@@ -106,7 +113,7 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(task.title)
-                        .font(.body)
+                        .font(isNested ? .callout : .body)
                         .strikethrough(task.status == .done)
                         .foregroundStyle(task.status == .done ? .secondary : .primary)
                         .lineLimit(2)
@@ -120,7 +127,7 @@ struct TaskRow: View {
                             .padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.18), in: Capsule())
                             .foregroundStyle(Color.accentColor)
-                    } else if let judgment = task.judgment(now: now) {
+                    } else if let judgment = resolved.judgment {
                         JudgmentBadge(judgment: judgment)
                     }
                 }
@@ -133,7 +140,7 @@ struct TaskRow: View {
         .padding(.vertical, 3)
         .contextMenu {
             if task.status == .notStarted {
-                // 명세서 5.3 — 이 기록이 6장 캘리브레이션의 입력이 된다.
+                // 명세서 8.1 — 이 기록이 9장 캘리브레이션의 입력이 된다.
                 Button("지금 시작") { task.markStarted() }
             }
             if task.status != .notStarted {
@@ -153,19 +160,19 @@ struct TaskRow: View {
         }
     }
 
-    /// 착수마감과 소요시간을 보여준다.
+    /// 언제 시작해야 하는지와 얼마나 걸리는지.
     /// 남은 시간을 숫자로 환산해 보여주지 않는다. (명세서 5.4)
     private var detailText: String {
         var parts: [String] = []
 
-        if let deadline = task.startDeadline() {
-            parts.append("착수 \(StartlineFormat.dayTime.string(from: deadline))")
+        if let deadline = resolved.startDeadline {
+            parts.append("\(StartlineFormat.spokenDayTime(deadline))에 시작")
         } else {
-            parts.append("착수마감 없음")
+            parts.append("시작 시점 없음")
         }
 
         if let duration = task.estimatedDuration {
-            parts.append("소요 \(StartlineFormat.duration(duration))")
+            parts.append("\(StartlineFormat.duration(duration)) 걸림")
         }
 
         return parts.joined(separator: " · ")
@@ -175,23 +182,22 @@ struct TaskRow: View {
 // MARK: - TO-DO 섹션
 
 struct TodoSectionContent: View {
-    let tasks: [ManagedTask]
-    let now: Date
-    let onEdit: (ManagedTask) -> Void
-    let onDelete: (ManagedTask) -> Void
+    let tasks: [ResolvedTask]
+    let emptyText: String
+    let onEdit: (ResolvedTask) -> Void
+    let onDelete: (ResolvedTask) -> Void
 
     var body: some View {
         if tasks.isEmpty {
-            Text("할 일이 없습니다.")
+            Text(emptyText)
                 .font(.callout)
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(tasks) { task in
+            ForEach(tasks) { resolved in
                 TaskRow(
-                    task: task,
-                    now: now,
-                    onEdit: { onEdit(task) },
-                    onDelete: { onDelete(task) }
+                    resolved: resolved,
+                    onEdit: { onEdit(resolved) },
+                    onDelete: { onDelete(resolved) }
                 )
             }
         }
