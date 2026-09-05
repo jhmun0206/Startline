@@ -2,7 +2,7 @@
 //  TodoSectionView.swift
 //  Startline
 //
-//  우측 패널의 「오늘 착수」 영역과 TO-DO 목록.
+//  우측 패널의 「오늘 시작」 영역과 할 일 목록.
 //  명세서 4.1 배치 근거 / 4.2 우측 단 / 5.4 표시 정책
 //
 
@@ -11,7 +11,7 @@ import SwiftUI
 
 // MARK: - 오늘 착수
 
-/// 명세서 4.1 — 우측 패널 최상단 고정.
+/// 명세서 5.2 1계층 — 우측 패널 최상단 고정.
 /// 사용자가 이미 아는 오늘 일정보다, 모르고 있는 착수 항목이 위에 와야 한다.
 /// **항목이 0개면 이 블록 자체가 사라진다.**
 struct TodayStartSection: View {
@@ -33,23 +33,20 @@ struct TodayStartSection: View {
     var body: some View {
         if !attentionTasks.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Label("오늘 착수", systemImage: "exclamationmark.triangle.fill")
+                Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.bold())
                     .foregroundStyle(.orange)
 
+                // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
+                // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
                 ForEach(attentionTasks) { resolved in
-                    HStack(spacing: 6) {
-                        // "회의 장소 연락 → GDG 미팅" — 부모가 붙으면 맥락을 함께 보여준다.
-                        Text(resolved.contextualTitle)
-                            .font(.callout)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        if let judgment = resolved.judgment {
-                            JudgmentBadge(judgment: judgment)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { onSelect(resolved) }
+                    // "회의 장소 연락 → GDG 미팅" — 부모가 붙으면 맥락을 함께 보여준다.
+                    Text(resolved.contextualTitle)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSelect(resolved) }
                 }
             }
             .padding(.horizontal, 16)
@@ -85,7 +82,7 @@ struct JudgmentBadge: View {
     }
 }
 
-// MARK: - TO-DO 행
+// MARK: - 할 일 행
 
 struct TaskRow: View {
     let resolved: ResolvedTask
@@ -179,7 +176,7 @@ struct TaskRow: View {
     }
 }
 
-// MARK: - TO-DO 섹션
+// MARK: - 할 일 섹션
 
 struct TodoSectionContent: View {
     let tasks: [ResolvedTask]

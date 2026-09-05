@@ -47,7 +47,7 @@ private struct AccessRequestView: View {
             Text("캘린더 접근이 필요합니다")
                 .font(.title2.bold())
 
-            Text("등록된 일정의 마감시각을 읽어 착수일을 역산합니다.\n일정을 수정하거나 외부로 전송하지 않습니다.")
+            Text("등록된 일정을 읽어 무엇을 언제 시작해야 하는지 알려드려요.\n일정을 고치거나 밖으로 보내지 않습니다.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

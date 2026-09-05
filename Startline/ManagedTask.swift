@@ -60,6 +60,7 @@ enum LeadTimeKind: String, Codable, CaseIterable {
 }
 
 /// 착수 판정. 명세서 5.4에 따라 남은 시간을 숫자로 내보내지 않고 판정만 전달한다.
+/// 화면에는 「여유 / 오늘 시작 / 늦음」으로 나간다. (원칙 4 — "착수"는 내부 용어)
 enum StartJudgment {
     case relaxed
     case startToday
@@ -68,8 +69,8 @@ enum StartJudgment {
     var label: String {
         switch self {
         case .relaxed: return "여유"
-        case .startToday: return "오늘 착수"
-        case .overdue: return "지연"
+        case .startToday: return "오늘 시작"
+        case .overdue: return "늦음"
         }
     }
 }

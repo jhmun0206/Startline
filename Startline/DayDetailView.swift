@@ -2,7 +2,7 @@
 //  DayDetailView.swift
 //  Startline
 //
-//  명세서 4.2 우측 — 「오늘 착수」 + 선택된 날짜의 일정 + TO-DO.
+//  명세서 5.2 우측 3계층 — 「오늘 시작」 + 「일정」 + 「할 일」.
 //
 
 import Combine
@@ -60,7 +60,7 @@ struct DayDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 1계층 — 최상단 고정. 항목이 0개면 블록 자체가 사라진다. (명세서 5.2)
+            // 1계층 「오늘 시작」 — 최상단 고정. 0개면 블록 자체가 사라진다. (명세서 5.2)
             TodayStartSection(tasks: resolvedTasks) { resolved in
                 jump(to: resolved)
             }
