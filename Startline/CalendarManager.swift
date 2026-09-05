@@ -310,6 +310,149 @@ final class CalendarManager {
         parentEventCache.removeAll()
     }
 
+    // MARK: - 일정 쓰기
+
+    /// 일정 생성·수정·삭제 중 생긴 문제. 조용히 넘기지 않고 화면에 그대로 알린다.
+    enum WriteError: LocalizedError {
+        case notAuthorized
+        case noWritableCalendar
+        case readOnly(calendarTitle: String)
+        case emptyTitle
+        case invalidTimeRange
+        case saveFailed(String)
+        case deleteFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notAuthorized:
+                return "캘린더 접근 권한이 없어 저장할 수 없어요."
+            case .noWritableCalendar:
+                return "새 일정을 넣을 수 있는 캘린더가 없어요. 시스템 설정에서 캘린더 계정을 확인해 주세요."
+            case .readOnly(let title):
+                return "‘\(title)’은 읽기 전용이라 여기에는 저장할 수 없어요."
+            case .emptyTitle:
+                return "제목을 입력해 주세요."
+            case .invalidTimeRange:
+                return "끝나는 시각이 시작하는 시각보다 빨라요."
+            case .saveFailed(let reason):
+                return "저장하지 못했어요. \(reason)"
+            case .deleteFailed(let reason):
+                return "삭제하지 못했어요. \(reason)"
+            }
+        }
+    }
+
+    /// 새 일정을 넣을 수 있는 캘린더들.
+    /// 구독 캘린더(공휴일 등)와 생일 캘린더는 내용을 고칠 수 없으므로 빠진다.
+    var writableCalendars: [EKCalendar] {
+        calendars.filter(\.allowsContentModifications)
+    }
+
+    /// 기본으로 고를 캘린더.
+    var defaultWritableCalendar: EKCalendar? {
+        eventStore.defaultCalendarForNewEvents.flatMap { candidate in
+            candidate.allowsContentModifications ? candidate : nil
+        } ?? writableCalendars.first
+    }
+
+    /// 이 일정을 고칠 수 있는지. 구독·생일 캘린더의 일정은 읽기 전용이다.
+    nonisolated func isEditable(_ event: EKEvent) -> Bool {
+        event.calendar?.allowsContentModifications ?? false
+    }
+
+    /// 일정을 만든다.
+    @discardableResult
+    func createEvent(
+        title: String,
+        calendar targetCalendar: EKCalendar,
+        start: Date,
+        end: Date,
+        isAllDay: Bool
+    ) throws -> EKEvent {
+        guard accessState == .authorized else { throw WriteError.notAuthorized }
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { throw WriteError.emptyTitle }
+        guard targetCalendar.allowsContentModifications else {
+            throw WriteError.readOnly(calendarTitle: targetCalendar.title)
+        }
+        guard end >= start else { throw WriteError.invalidTimeRange }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.title = trimmed
+        event.calendar = targetCalendar
+        event.isAllDay = isAllDay
+        event.startDate = start
+        event.endDate = end
+
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            throw WriteError.saveFailed(error.localizedDescription)
+        }
+
+        reloadAfterWrite()
+        return event
+    }
+
+    /// 기존 일정을 고친다.
+    func updateEvent(
+        _ event: EKEvent,
+        title: String,
+        calendar targetCalendar: EKCalendar,
+        start: Date,
+        end: Date,
+        isAllDay: Bool,
+        span: EKSpan
+    ) throws {
+        guard accessState == .authorized else { throw WriteError.notAuthorized }
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { throw WriteError.emptyTitle }
+        guard isEditable(event) else {
+            throw WriteError.readOnly(calendarTitle: event.calendar?.title ?? "이 캘린더")
+        }
+        guard targetCalendar.allowsContentModifications else {
+            throw WriteError.readOnly(calendarTitle: targetCalendar.title)
+        }
+        guard end >= start else { throw WriteError.invalidTimeRange }
+
+        event.title = trimmed
+        event.calendar = targetCalendar
+        event.isAllDay = isAllDay
+        event.startDate = start
+        event.endDate = end
+
+        do {
+            try eventStore.save(event, span: span, commit: true)
+        } catch {
+            throw WriteError.saveFailed(error.localizedDescription)
+        }
+
+        reloadAfterWrite()
+    }
+
+    /// 일정을 지운다. 되돌릴 수 없고 연결된 계정과 다른 기기에도 전파된다.
+    func deleteEvent(_ event: EKEvent, span: EKSpan) throws {
+        guard accessState == .authorized else { throw WriteError.notAuthorized }
+        guard isEditable(event) else {
+            throw WriteError.readOnly(calendarTitle: event.calendar?.title ?? "이 캘린더")
+        }
+
+        do {
+            try eventStore.remove(event, span: span, commit: true)
+        } catch {
+            throw WriteError.deleteFailed(error.localizedDescription)
+        }
+
+        reloadAfterWrite()
+    }
+
+    /// 쓰기 직후에는 변경 알림을 기다리지 않고 바로 다시 읽는다.
+    private func reloadAfterWrite() {
+        loadCalendars()
+        loadEventsForDisplayedMonth()
+        storeChangeToken &+= 1
+    }
+
     // MARK: - 부모 일정 조회 (명세서 7.4)
 
     /// 할 일에 붙은 부모 일정을 찾는다. 결과는 다음 일정 로드 때까지 캐시된다.
@@ -354,23 +497,53 @@ final class CalendarManager {
         } ?? base
     }
 
-    /// 부모로 고를 수 있는 일정 후보. 그리드 표시 상태를 건드리지 않는다.
+    /// 임의 범위의 일정을 시간순으로 읽어 온다. 그리드 표시 상태를 건드리지 않는다.
     ///
-    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (6.2와 같은 기준)
-    func candidateEvents(around date: Date, daysBefore: Int = 7, daysAfter: Int = 60) -> [EKEvent] {
+    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (명세서 6.2와 같은 기준)
+    func fetchEvents(from start: Date, to end: Date) -> [EKEvent] {
         guard accessState == .authorized else { return [] }
-
-        let anchor = calendar.startOfDay(for: date)
-        guard let start = calendar.date(byAdding: .day, value: -daysBefore, to: anchor),
-              let end = calendar.date(byAdding: .day, value: daysAfter, to: anchor)
-        else { return [] }
 
         let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
 
         var seen = Set<String>()
         return eventStore.events(matching: predicate)
-            .sorted(by: Self.isOrderedBefore)
+            .sorted(by: Self.isOrderedChronologically)
             .filter { seen.insert(DayEvent.groupingKey(for: $0)).inserted }
+    }
+
+    /// 부모로 고를 수 있는 일정 후보.
+    func candidateEvents(around date: Date, daysBefore: Int = 7, daysAfter: Int = 60) -> [EKEvent] {
+        let anchor = calendar.startOfDay(for: date)
+        guard let start = calendar.date(byAdding: .day, value: -daysBefore, to: anchor),
+              let end = calendar.date(byAdding: .day, value: daysAfter, to: anchor)
+        else { return [] }
+        return fetchEvents(from: start, to: end)
+    }
+
+    /// 미니 캘린더용 — 한 달 그리드 범위의 일정을 날짜별로 묶어 돌려준다.
+    func eventsByDay(forMonth month: Date) -> [Date: [EKEvent]] {
+        let days = Self.gridDays(for: month, calendar: calendar)
+        guard let first = days.first,
+              let last = days.last,
+              let end = calendar.date(byAdding: .day, value: 1, to: last)
+        else { return [:] }
+
+        var result: [Date: [EKEvent]] = [:]
+        for event in fetchEvents(from: first, to: end.addingTimeInterval(-1)) {
+            guard let start = event.startDate else { continue }
+            var last = event.endDate ?? start
+            if !event.isAllDay, last > start, last == calendar.startOfDay(for: last) {
+                last = last.addingTimeInterval(-1)
+            }
+            var day = calendar.startOfDay(for: max(start, first))
+            let lastDay = calendar.startOfDay(for: min(last, end))
+            while day <= lastDay {
+                result[day, default: []].append(event)
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+            }
+        }
+        return result.mapValues { $0.sorted(by: Self.isOrderedBefore) }
     }
 
     /// 특정 날짜에 표시할 일정 (캘린더 간 중복 제거됨).
@@ -473,7 +646,11 @@ final class CalendarManager {
         }
     }
 
-    /// 종일 일정 우선, 그 다음 시작시각, 그 다음 제목.
+    /// **하루 안에서의** 정렬. 종일 일정 우선, 그 다음 시작시각, 그 다음 제목.
+    ///
+    /// 여러 날에 걸친 목록에는 쓰지 않는다. 종일 여부를 먼저 보므로
+    /// 다른 달의 종일 일정이 이번 달 시간 일정보다 앞서게 된다.
+    /// 그런 목록에는 `isOrderedChronologically` 를 쓴다.
     ///
     /// 상태를 읽지 않는 순수 비교 함수다. `sorted(by:)` 에 함수 자체를 넘기려면
     /// 액터 격리에서 벗어나 있어야 한다.
@@ -484,6 +661,15 @@ final class CalendarManager {
         let r = rhs.startDate ?? .distantFuture
         if l != r { return l < r }
 
+        return (lhs.title ?? "") < (rhs.title ?? "")
+    }
+
+    /// **여러 날에 걸친 목록**의 정렬. 시작시각이 먼저다.
+    nonisolated static func isOrderedChronologically(_ lhs: EKEvent, _ rhs: EKEvent) -> Bool {
+        let l = lhs.startDate ?? .distantFuture
+        let r = rhs.startDate ?? .distantFuture
+        if l != r { return l < r }
+        if lhs.isAllDay != rhs.isAllDay { return lhs.isAllDay }
         return (lhs.title ?? "") < (rhs.title ?? "")
     }
 }

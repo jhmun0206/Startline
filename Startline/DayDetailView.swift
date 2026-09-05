@@ -12,6 +12,8 @@ import SwiftUI
 
 struct DayDetailView: View {
     let manager: CalendarManager
+    /// 그리드에서 클릭한 일정. 값이 들어오면 편집 시트를 연다.
+    @Binding var eventToOpen: DayEvent?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -21,7 +23,9 @@ struct DayDetailView: View {
     /// 착수 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
     @State private var editingTask: ManagedTask?
-    @State private var isAddingTask = false
+    @State private var isAddingItem = false
+    /// 「일정 추가」에서 만든 일정을 부모로 이어받은 할 일 입력.
+    @State private var taskParentPreset: EKEvent?
     /// 부모 일정이 사라져 독립 할 일로 전환된 항목들. (명세서 4.2)
     @State private var detachedNotices: [DetachedTaskNotice] = []
 
@@ -81,14 +85,21 @@ struct DayDetailView: View {
         // 캘린더 앱 등에서 일정이 바뀌면 CalendarManager 가 토큰을 올린다.
         // 뷰 본문이 아니라 여기서 정리하므로 렌더링 중 저장이 일어나지 않는다.
         .onChange(of: manager.storeChangeToken) { _, _ in syncLinks() }
-        .sheet(isPresented: $isAddingTask) {
-            TaskEditorView(task: nil, defaultDueDate: manager.selectedDate, manager: manager)
+        .sheet(isPresented: $isAddingItem) {
+            AddSheetView(manager: manager, defaultDate: manager.selectedDate)
         }
         .sheet(item: $editingTask) { task in
             TaskEditorView(
                 task: task,
                 defaultDueDate: task.dueAt ?? manager.selectedDate,
                 manager: manager
+            )
+        }
+        .sheet(item: $eventToOpen) { dayEvent in
+            EventEditorView(
+                manager: manager,
+                event: dayEvent.primary,
+                defaultDate: manager.selectedDate
             )
         }
         .alert("연결된 일정이 사라졌어요", isPresented: detachedAlertBinding) {
@@ -109,6 +120,8 @@ struct DayDetailView: View {
             } else {
                 ForEach(events) { dayEvent in
                     EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                        .contentShape(Rectangle())
+                        .onTapGesture { eventToOpen = dayEvent }
 
                     ForEach(attachedTasks(for: dayEvent)) { resolved in
                         TaskRow(
@@ -154,12 +167,12 @@ struct DayDetailView: View {
                     .font(.title3.bold())
                 Spacer()
                 Button {
-                    isAddingTask = true
+                    isAddingItem = true
                 } label: {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.borderless)
-                .help("할 일 추가")
+                .help("일정이나 할 일 추가")
             }
             Text("일정 \(events.count)개 · 할 일 \(independentTasks.count)개")
                 .font(.caption)

@@ -11,6 +11,8 @@ import SwiftUI
 
 struct MonthGridView: View {
     let manager: CalendarManager
+    /// 그리드에서 일정을 클릭했을 때.
+    let onOpenEvent: (DayEvent) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,10 +37,15 @@ struct MonthGridView: View {
                             events: manager.events(on: day),
                             isInMonth: manager.isInDisplayedMonth(day),
                             isToday: manager.calendar.isDateInToday(day),
-                            isSelected: manager.calendar.isDate(day, inSameDayAs: manager.selectedDate)
-                        ) {
-                            manager.selectedDate = manager.calendar.startOfDay(for: day)
-                        }
+                            isSelected: manager.calendar.isDate(day, inSameDayAs: manager.selectedDate),
+                            onSelect: {
+                                manager.selectedDate = manager.calendar.startOfDay(for: day)
+                            },
+                            onOpenEvent: { dayEvent in
+                                manager.selectedDate = manager.calendar.startOfDay(for: day)
+                                onOpenEvent(dayEvent)
+                            }
+                        )
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -175,6 +182,7 @@ private struct DayCell: View {
     let isToday: Bool
     let isSelected: Bool
     let onSelect: () -> Void
+    let onOpenEvent: (DayEvent) -> Void
 
     private static let barHeight: CGFloat = 15
     private static let barSpacing: CGFloat = 2
@@ -189,8 +197,12 @@ private struct DayCell: View {
                     .frame(height: Self.numberRowHeight)
 
                 ForEach(visibleEvents(capacity: capacity)) { dayEvent in
-                    EventBar(dayEvent: dayEvent, isDimmed: !isInMonth)
-                        .frame(height: Self.barHeight)
+                    EventBar(
+                        dayEvent: dayEvent,
+                        isDimmed: !isInMonth,
+                        onOpen: { onOpenEvent(dayEvent) }
+                    )
+                    .frame(height: Self.barHeight)
                 }
 
                 if let overflow = overflowCount(capacity: capacity) {
@@ -264,10 +276,14 @@ private struct DayCell: View {
 }
 
 /// 일정 한 건을 나타내는 색상 바. 제목이 바 안에 직접 보인다.
-/// 칸이 좁으므로 시각은 넣지 않는다. 시각은 우측 상세 패널에서 본다.
+/// 칸이 좁으므로 시각은 넣지 않는다. 시각은 마우스를 올리면 나오는 미리보기와 우측 패널에서 본다.
 private struct EventBar: View {
     let dayEvent: DayEvent
     let isDimmed: Bool
+    let onOpen: () -> Void
+
+    @State private var isShowingPreview = false
+    @State private var hoverDelay: Task<Void, Never>?
 
     var body: some View {
         let color = dayEvent.primary.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray
@@ -283,17 +299,97 @@ private struct EventBar: View {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(color.opacity(isDimmed ? 0.35 : 0.9))
             )
-            .help(helpText)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                cancelHover()
+                onOpen()
+            }
+            .onHover { hovering in
+                if hovering {
+                    // 칸 위를 스쳐 지나갈 때마다 뜨지 않도록 잠깐 기다린다.
+                    hoverDelay?.cancel()
+                    hoverDelay = Task {
+                        try? await Task.sleep(for: .milliseconds(450))
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run { isShowingPreview = true }
+                    }
+                } else {
+                    cancelHover()
+                }
+            }
+            .popover(isPresented: $isShowingPreview, arrowEdge: .trailing) {
+                EventPreviewCard(dayEvent: dayEvent)
+            }
+    }
+
+    private func cancelHover() {
+        hoverDelay?.cancel()
+        hoverDelay = nil
+        isShowingPreview = false
     }
 
     private var title: String {
         dayEvent.primary.title ?? "(제목 없음)"
     }
+}
 
-    private var helpText: String {
-        guard dayEvent.isDuplicated else { return title }
-        return "\(title) — \(dayEvent.calendarTitles.joined(separator: ", "))"
+/// 마우스를 올렸을 때 나오는 미리보기.
+///
+/// **여기서는 고치지 않는다.** 마우스가 벗어나면 사라지는 화면에 편집을 넣으면
+/// 조작하다가 놓치기 쉽다. 고치는 것은 클릭해서 여는 시트가 맡는다.
+struct EventPreviewCard: View {
+    let dayEvent: DayEvent
+
+    private var event: EKEvent { dayEvent.primary }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 그리드에서 잘려 보이던 제목을 여기서는 온전히 보여준다.
+            Text(event.title ?? "(제목 없음)")
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Label(timeText, systemImage: "clock")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if let location = event.location, !location.isEmpty {
+                Label(location, systemImage: "mappin.and.ellipse")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(Array(dayEvent.events.enumerated()), id: \.offset) { _, source in
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(source.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
+                        .frame(width: 7, height: 7)
+                    Text(source.calendar?.title ?? "(캘린더 없음)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 200, maxWidth: 300, alignment: .leading)
     }
+
+    private var timeText: String {
+        guard let start = event.startDate else { return "-" }
+        if event.isAllDay {
+            return "\(StartlineFormat.spokenDay.string(from: start)) 종일"
+        }
+        let end = event.endDate ?? start
+        return "\(StartlineFormat.spokenDayTime(start)) ~ \(Self.timeFormatter.string(from: end))"
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .startlineDisplay
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 }
 
 // MARK: - 보조

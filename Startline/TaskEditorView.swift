@@ -24,6 +24,8 @@ struct TaskEditorView: View {
     let defaultDueDate: Date
     /// 부모 일정 후보를 찾는 데 쓴다.
     let manager: CalendarManager
+    /// 방금 만든 일정을 부모로 미리 잡아둘 때 쓴다.
+    var presetParent: EKEvent?
 
     /// 「언제까지」를 정하는 두 방식. (명세서 5.3)
     private enum DueMode: Hashable {
@@ -49,7 +51,6 @@ struct TaskEditorView: View {
     @State private var parentEvent: EKEvent?
     /// 부모 일정 시작 기준 며칠 전인지.
     @State private var daysBeforeParent = 1
-    @State private var candidates: [EKEvent] = []
 
     /// UI로 표현할 수 없는 기존 리드타임(시간 단위 등)을 편집 중에 잃지 않도록 보관한다.
     @State private var preservedLeadTime: LeadTime?
@@ -71,16 +72,11 @@ struct TaskEditorView: View {
 
             Form {
                 Section {
-                    TextField("무엇을", text: $title)
+                    TextField("제목", text: $title)
                 }
 
                 Section("언제까지") {
-                    Picker("", selection: $dueMode) {
-                        Text("특정 날짜").tag(DueMode.specificDate)
-                        Text("일정에 맞춰").tag(DueMode.attachedToEvent)
-                    }
-                    .pickerStyle(.radioGroup)
-                    .labelsHidden()
+                    dueModeSelector
 
                     switch dueMode {
                     case .specificDate:
@@ -126,47 +122,68 @@ struct TaskEditorView: View {
         .onAppear(perform: load)
     }
 
+    // MARK: - 「언제까지」 방식 고르기
+
+    /// 라디오 대신 좌우 2분할 버튼. 고른 쪽만 은은한 파란 배경으로 남는다.
+    private var dueModeSelector: some View {
+        HStack(spacing: 8) {
+            modeButton("특정 날짜", .specificDate)
+            modeButton("일정에 맞춰", .attachedToEvent)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func modeButton(_ label: String, _ mode: DueMode) -> some View {
+        let isOn = dueMode == mode
+
+        return Text(label)
+            .font(.callout)
+            .fontWeight(isOn ? .semibold : .regular)
+            .foregroundStyle(isOn ? Color.accentColor : .primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isOn ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { dueMode = mode }
+    }
+
     // MARK: - 부모 일정 선택 (명세서 5.3)
 
-    /// [일정 선택 ▾] 의 [N]일 전
+    /// 목록 드롭다운 대신 작은 달력에서 고른다.
+    /// 사람은 "언제쯤"으로 일정을 기억하므로 날짜에서 출발하는 편이 찾기 쉽다.
     @ViewBuilder
     private var parentEventRow: some View {
-        if candidates.isEmpty {
-            Text("이 날짜 근처에 고를 수 있는 일정이 없어요.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } else {
-            Picker("일정", selection: parentSelection) {
-                Text("일정 선택").tag(String?.none)
-                ForEach(candidates, id: \.eventIdentifier) { event in
-                    Text(eventLabel(event)).tag(Optional(eventKey(event)))
-                }
-            }
-
-            Stepper(value: $daysBeforeParent, in: 0...365) {
-                Text(daysBeforeParent == 0 ? "일정 당일" : "\(daysBeforeParent)일 전")
-            }
-        }
-    }
-
-    /// Picker 는 Hashable 값을 요구하므로 일정 자체 대신 키로 오간다.
-    private var parentSelection: Binding<String?> {
-        Binding(
-            get: { parentEvent.map(eventKey) },
-            set: { key in
-                parentEvent = candidates.first { eventKey($0) == key }
-            }
+        MiniCalendarPicker(
+            manager: manager,
+            selection: $parentEvent,
+            anchorDate: defaultDueDate
         )
-    }
 
-    private func eventKey(_ event: EKEvent) -> String {
-        "\(event.eventIdentifier ?? "")|\(event.startDate?.timeIntervalSinceReferenceDate ?? 0)"
-    }
-
-    private func eventLabel(_ event: EKEvent) -> String {
-        let title = event.title ?? "(제목 없음)"
-        guard let start = event.startDate else { return title }
-        return "\(StartlineFormat.spokenDay.string(from: start)) \(title)"
+        if let parentEvent {
+            Divider()
+            HStack(spacing: 6) {
+                Text(parentEvent.title ?? "(제목 없음)")
+                    .font(.callout.bold())
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Stepper(value: $daysBeforeParent, in: 0...365) {
+                    Text(daysBeforeParent == 0 ? "당일까지" : "\(daysBeforeParent)일 전까지")
+                        .font(.callout)
+                }
+                .fixedSize()
+            }
+        } else {
+            Text("위에서 일정을 하나 고르세요.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// 부모 시작시각 기준 상대 마감. 음수가 "며칠 전". (명세서 4.1)
@@ -286,7 +303,11 @@ struct TaskEditorView: View {
     // MARK: - 로드 / 저장
 
     private func load() {
-        candidates = manager.candidateEvents(around: defaultDueDate)
+        // 방금 만든 일정에서 이어져 왔으면 그 일정을 부모로 잡고 시작한다.
+        if let presetParent {
+            dueMode = .attachedToEvent
+            parentEvent = presetParent
+        }
 
         guard let task else {
             // 새 항목의 기본 마감은 선택한 날짜의 23:59.
@@ -309,16 +330,10 @@ struct TaskEditorView: View {
         // 부모가 붙어 있으면 「일정에 맞춰」로 열고, 후보 목록에 없으면 부모를 직접 찾아 채운다.
         if let parentEventID = task.parentEventID {
             dueMode = .attachedToEvent
-            let found = manager.parentEvent(
+            parentEvent = manager.parentEvent(
                 id: parentEventID,
                 occurrenceDate: task.parentOccurrenceDate
             )
-            if let found {
-                if !candidates.contains(where: { $0.eventIdentifier == found.eventIdentifier }) {
-                    candidates.insert(found, at: 0)
-                }
-                parentEvent = found
-            }
             if let offset = task.offsetFromParent {
                 daysBeforeParent = max(0, Int((-offset / (24 * 60 * 60)).rounded()))
             }

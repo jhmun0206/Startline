@@ -10,6 +10,8 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var manager = CalendarManager()
+    /// 그리드에서 클릭한 일정. 우측 패널이 편집 시트를 연다.
+    @State private var eventToOpen: DayEvent?
 
     var body: some View {
         Group {
@@ -21,9 +23,12 @@ struct ContentView: View {
             case .authorized:
                 // 명세서 4.2 — 좌: 월간 그리드 / 우: 선택 날짜 상세
                 HSplitView {
-                    MonthGridView(manager: manager)
-                        .frame(minWidth: 480, idealWidth: 700)
-                    DayDetailView(manager: manager)
+                    MonthGridView(manager: manager) { dayEvent in
+                        eventToOpen = dayEvent
+                    }
+                    .frame(minWidth: 480, idealWidth: 700)
+
+                    DayDetailView(manager: manager, eventToOpen: $eventToOpen)
                         .frame(minWidth: 260, idealWidth: 300, maxWidth: 460)
                 }
             }
