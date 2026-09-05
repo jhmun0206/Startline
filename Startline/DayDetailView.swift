@@ -23,7 +23,7 @@ struct DayDetailView: View {
     @State private var editingTask: ManagedTask?
     @State private var isAddingTask = false
     /// 부모 일정이 사라져 독립 할 일로 전환된 항목들. (명세서 4.2)
-    @State private var detachedTitles: [String] = []
+    @State private var detachedNotices: [DetachedTaskNotice] = []
 
     private let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -78,6 +78,9 @@ struct DayDetailView: View {
         }
         .onReceive(clock) { now = $0 }
         .task(id: manager.displayedMonth) { syncLinks() }
+        // 캘린더 앱 등에서 일정이 바뀌면 CalendarManager 가 토큰을 올린다.
+        // 뷰 본문이 아니라 여기서 정리하므로 렌더링 중 저장이 일어나지 않는다.
+        .onChange(of: manager.storeChangeToken) { _, _ in syncLinks() }
         .sheet(isPresented: $isAddingTask) {
             TaskEditorView(task: nil, defaultDueDate: manager.selectedDate, manager: manager)
         }
@@ -88,10 +91,10 @@ struct DayDetailView: View {
                 manager: manager
             )
         }
-        .alert("일정이 사라져 할 일만 남겨뒀어요", isPresented: detachedAlertBinding) {
-            Button("확인") { detachedTitles = [] }
+        .alert("연결된 일정이 사라졌어요", isPresented: detachedAlertBinding) {
+            Button("확인") { detachedNotices = [] }
         } message: {
-            Text("\(detachedTitles.joined(separator: ", "))\n연결된 일정이 삭제돼서, 마지막 마감 그대로 따로 관리해요.")
+            Text(detachedMessage)
         }
     }
 
@@ -171,8 +174,8 @@ struct DayDetailView: View {
 
     /// 부모 일정 상태를 저장값에 반영한다. 화면을 그리는 중이 아니라 여기서만 쓴다.
     private func syncLinks() {
-        let detached = TaskLinkMaintenance.sync(tasks: allTasks, manager: manager, now: now)
-        if !detached.isEmpty { detachedTitles = detached }
+        let detached = TaskLinkMaintenance.sync(tasks: allTasks, manager: manager)
+        if !detached.isEmpty { detachedNotices = detached }
     }
 
     private func jump(to resolved: ResolvedTask) {
@@ -189,9 +192,15 @@ struct DayDetailView: View {
 
     private var detachedAlertBinding: Binding<Bool> {
         Binding(
-            get: { !detachedTitles.isEmpty },
-            set: { if !$0 { detachedTitles = [] } }
+            get: { !detachedNotices.isEmpty },
+            set: { if !$0 { detachedNotices = [] } }
         )
+    }
+
+    /// 어떤 할 일이 왜 전환됐는지 밝힌다. 조용히 바뀌면 안 된다. (명세서 4.2)
+    private var detachedMessage: String {
+        let list = detachedNotices.map(\.summary).joined(separator: "\n")
+        return "\(list)\n\n연결된 일정이 지워졌어요. 할 일은 지우지 않고 마지막 마감 그대로 남겨뒀어요."
     }
 
     private var dateTitle: String {

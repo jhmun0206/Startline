@@ -60,8 +60,8 @@ struct DayEvent: Identifiable {
         }
     }
 
-    /// 중복 판정 키.
-    static func groupingKey(for event: EKEvent) -> String {
+    /// 중복 판정 키. 상태를 읽지 않으므로 액터 격리에서 벗어나 있다.
+    nonisolated static func groupingKey(for event: EKEvent) -> String {
         let start = event.startDate?.timeIntervalSinceReferenceDate ?? 0
         return "\(event.isAllDay)|\(start)|\(event.title ?? "")"
     }
@@ -96,6 +96,13 @@ final class CalendarManager {
     /// 권한 요청 중 에러가 발생한 경우의 메시지.
     private(set) var errorMessage: String?
 
+    /// 외부 캘린더 변경을 반영할 때마다 하나씩 오른다.
+    ///
+    /// 뷰는 이 값이 바뀌는 것을 보고 후속 정리(`TaskLinkMaintenance.sync`)를 돌린다.
+    /// 정리 작업은 SwiftData에 쓰기를 하므로 화면을 그리는 도중에 실행되면 안 된다.
+    /// 토큰을 한 단계 두어, 쓰기가 뷰 본문이 아니라 변경 감지 액션에서 일어나게 한다.
+    private(set) var storeChangeToken = 0
+
     // MARK: - 내부
 
     private let eventStore = EKEventStore()
@@ -105,6 +112,12 @@ final class CalendarManager {
     /// 관찰 대상에서 빼둔다. 화면을 그리는 도중에 조회가 일어나도 뷰 갱신을 유발하지 않아야 하고,
     /// 캐시 자체는 화면에 보이는 상태가 아니다. 값에 `nil` 을 담아 "찾지 못함"도 캐시한다.
     @ObservationIgnored private var parentEventCache: [String: EKEvent?] = [:]
+
+    /// `.EKEventStoreChanged` 관찰자.
+    @ObservationIgnored private var storeChangeObserver: NSObjectProtocol?
+
+    /// 디바운스용. 직전에 예약된 갱신을 취소하고 마지막 것만 실행한다.
+    @ObservationIgnored private var pendingReload: Task<Void, Never>?
 
     /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
     let calendar: Calendar
@@ -122,6 +135,47 @@ final class CalendarManager {
         if accessState == .authorized {
             loadCalendarsAndEvents()
         }
+        startObservingStoreChanges()
+    }
+
+    deinit {
+        pendingReload?.cancel()
+        if let storeChangeObserver {
+            NotificationCenter.default.removeObserver(storeChangeObserver)
+        }
+    }
+
+    // MARK: - 외부 변경 감지 (BL-006, BL-020)
+
+    /// 캘린더 앱이나 구글에서 일정이 바뀌면 EventKit이 알려준다.
+    /// 이걸 구독하지 않으면 앱을 켜둔 동안 화면이 낡은 채로 남고,
+    /// 삭제·이동된 일정을 기준으로 잘못된 착수마감이 계산된다.
+    private func startObservingStoreChanges() {
+        storeChangeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: eventStore,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleReload()
+        }
+    }
+
+    /// 한 번의 편집에도 알림이 여러 번 몰려 오므로 마지막 것만 처리한다.
+    private func scheduleReload() {
+        pendingReload?.cancel()
+        pendingReload = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            await MainActor.run { self.applyExternalChange() }
+        }
+    }
+
+    /// 표시 중인 범위를 다시 읽고, 뷰가 후속 정리를 하도록 토큰을 올린다.
+    private func applyExternalChange() {
+        guard accessState == .authorized else { return }
+        loadCalendars()
+        loadEventsForDisplayedMonth()   // 부모 조회 캐시도 함께 비워진다
+        storeChangeToken &+= 1
     }
 
     // MARK: - 권한
@@ -401,7 +455,7 @@ final class CalendarManager {
 
     /// 같은 제목·같은 시작시각의 일정을 한 건으로 묶는다.
     /// 입력 순서를 유지하므로 정렬된 배열을 넘겨야 한다.
-    private static func groupDuplicates(_ events: [EKEvent]) -> [DayEvent] {
+    nonisolated private static func groupDuplicates(_ events: [EKEvent]) -> [DayEvent] {
         var order: [String] = []
         var groups: [String: [EKEvent]] = [:]
 
@@ -420,7 +474,10 @@ final class CalendarManager {
     }
 
     /// 종일 일정 우선, 그 다음 시작시각, 그 다음 제목.
-    private static func isOrderedBefore(_ lhs: EKEvent, _ rhs: EKEvent) -> Bool {
+    ///
+    /// 상태를 읽지 않는 순수 비교 함수다. `sorted(by:)` 에 함수 자체를 넘기려면
+    /// 액터 격리에서 벗어나 있어야 한다.
+    nonisolated private static func isOrderedBefore(_ lhs: EKEvent, _ rhs: EKEvent) -> Bool {
         if lhs.isAllDay != rhs.isAllDay { return lhs.isAllDay }
 
         let l = lhs.startDate ?? .distantFuture
