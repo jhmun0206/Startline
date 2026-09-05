@@ -133,6 +133,9 @@ struct TaskRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // 체크박스는 제외하고 본문만 눌러야 수정 시트가 열린다.
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onEdit)
         }
         .padding(.vertical, 3)
         .contextMenu {

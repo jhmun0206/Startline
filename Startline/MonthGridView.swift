@@ -52,6 +52,8 @@ struct MonthGridView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
     }
 }
 
@@ -168,7 +170,8 @@ private struct WeekdayHeaderView: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 18)
     }
 }
 
@@ -241,7 +244,8 @@ private struct DayCell: View {
                 .frame(width: 19, height: 19)
                 .background {
                     if isToday {
-                        Circle().fill(Color.accentColor)
+                        // 선택 표시가 파란 테두리라, 오늘은 빨강으로 구분한다.
+                        Circle().fill(Color.red)
                     }
                 }
             Spacer(minLength: 0)

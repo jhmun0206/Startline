@@ -5,7 +5,7 @@
 //  일정 만들기 / 고치기 / 지우기. EventKit 에 직접 쓴다.
 //
 //  이 앱의 핵심 흐름은 "미팅을 잡으면서 준비할 일도 같이 만든다"이다.
-//  그래서 일정을 저장한 뒤 곧바로 그 일정에 딸린 할 일을 만들 수 있게 이어준다.
+//  그래서 폼 안에서 준비 할 일을 여러 개 함께 적고, 저장할 때 한꺼번에 만든다.
 //
 
 import EventKit
@@ -15,14 +15,13 @@ import SwiftUI
 struct EventEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     let manager: CalendarManager
     /// 고칠 일정. nil 이면 새로 만든다.
     let event: EKEvent?
     /// 새로 만들 때의 기준 날짜.
     let defaultDate: Date
-    /// 저장한 일정을 부모로 하는 할 일 입력으로 이어갈 때 호출한다.
-    var onAddTaskForEvent: ((EKEvent) -> Void)?
 
     @Query private var allTasks: [ManagedTask]
 
@@ -35,8 +34,16 @@ struct EventEditorView: View {
 
     @State private var errorMessage: String?
     @State private var isConfirmingDelete = false
-    /// 저장 직후 "딸린 할 일도 만들까요?" 를 띄우기 위한 값.
-    @State private var savedEvent: EKEvent?
+
+    /// 일정을 저장할 때 함께 만들 할 일들. 폼 안에서 여러 개를 한 번에 적는다.
+    @State private var draftTasks: [DraftTask] = []
+
+    /// 폼 안에서만 쓰는 할 일 초안.
+    struct DraftTask: Identifiable {
+        let id = UUID()
+        var title = ""
+        var daysBefore = 1
+    }
 
     private var isEditing: Bool { event != nil }
 
@@ -71,7 +78,7 @@ struct EventEditorView: View {
     /// 고칠 수 없는 일정은 편집 폼을 열지 않고 내용과 이유만 보여준다.
     private var readOnlyBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sheetTitle("일정 보기")
+            SheetHeader(title: "일정 보기") { dismiss() }
 
             Form {
                 Section {
@@ -80,7 +87,9 @@ struct EventEditorView: View {
                     if let location = event?.location, !location.isEmpty {
                         LabeledContent("장소", value: location)
                     }
-                    LabeledContent("캘린더", value: event?.calendar?.title ?? "-")
+                    LabeledContent("캘린더") {
+                        CalendarLabel(calendar: event?.calendar)
+                    }
                 }
 
                 Section {
@@ -108,7 +117,10 @@ struct EventEditorView: View {
 
     private var editableBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !isEditing { sheetTitle("일정 추가") } else { sheetTitle("일정 고치기") }
+            SheetHeader(
+                title: isEditing ? "일정 수정" : "일정 추가",
+                hasUnsavedInput: hasUnsavedInput
+            ) { dismiss() }
 
             Form {
                 Section {
@@ -125,19 +137,23 @@ struct EventEditorView: View {
                 }
                 .environment(\.locale, .startlineDisplay)
 
-                Section("어느 캘린더에") {
+                Section("캘린더") {
                     if manager.writableCalendars.isEmpty {
                         Text("새 일정을 넣을 수 있는 캘린더가 없어요.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("캘린더", selection: $selectedCalendarID) {
-                            ForEach(manager.writableCalendars, id: \.calendarIdentifier) { calendar in
-                                Text("\(calendar.title) · \(calendar.source.title)")
-                                    .tag(Optional(calendar.calendarIdentifier))
-                            }
+                        LabeledContent("캘린더") {
+                            CalendarPickerField(
+                                calendars: manager.writableCalendars,
+                                selectedID: $selectedCalendarID
+                            )
                         }
                     }
+                }
+
+                if !isEditing {
+                    draftTaskSection
                 }
 
                 if isRecurring {
@@ -172,29 +188,14 @@ struct EventEditorView: View {
         } message: {
             Text(deleteWarning)
         }
-        .alert("이 일정에 딸린 할 일도 만들까요?", isPresented: savedAlertBinding) {
-            Button("할 일 만들기") {
-                if let savedEvent { onAddTaskForEvent?(savedEvent) }
-                savedEvent = nil
-                dismiss()
-            }
-            Button("나중에", role: .cancel) {
-                savedEvent = nil
-                dismiss()
-            }
-        } message: {
-            Text("‘\(savedEvent?.title ?? "")’ 전에 미리 해둘 일이 있다면 지금 같이 적어두세요.")
-        }
     }
 
     private var footer: some View {
         HStack {
             if isEditing {
-                Button("지우기", role: .destructive) { isConfirmingDelete = true }
+                Button("삭제", role: .destructive) { isConfirmingDelete = true }
             }
             Spacer()
-            Button("그만두기") { dismiss() }
-                .keyboardShortcut(.cancelAction)
             Button(isEditing ? "저장" : "만들기") { save() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty
@@ -203,12 +204,53 @@ struct EventEditorView: View {
         .padding(16)
     }
 
-    private func sheetTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
+    // MARK: - 이 일정 전에 할 일
+
+    /// 일정을 만들면서 준비 작업을 여러 개 한꺼번에 적는다.
+    /// 저장하면 모두 이 일정에 딸린 할 일로 만들어진다. (명세서 8장)
+    private var draftTaskSection: some View {
+        Section("이 일정 전에 할 일") {
+            ForEach($draftTasks) { $draft in
+                HStack(spacing: 8) {
+                    TextField("무엇을 미리 해둘까요", text: $draft.title)
+
+                    Stepper(value: $draft.daysBefore, in: 0...365) {
+                        Text(draft.daysBefore == 0 ? "당일까지" : "\(draft.daysBefore)일 전까지")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .fixedSize()
+
+                    Button {
+                        draftTasks.removeAll { $0.id == draft.id }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("이 줄 지우기")
+                }
+            }
+
+            Button {
+                draftTasks.append(DraftTask())
+            } label: {
+                Label("할 일 추가", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    /// 저장하지 않은 입력이 있는지. 닫기를 눌렀을 때 되물을지 판단한다.
+    private var hasUnsavedInput: Bool {
+        if isEditing {
+            guard let event else { return false }
+            return title != (event.title ?? "")
+                || isAllDay != event.isAllDay
+                || !manager.calendar.isDate(day, inSameDayAs: event.startDate ?? day)
+        }
+        return !title.trimmingCharacters(in: .whitespaces).isEmpty
+            || draftTasks.contains { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
     // MARK: - 문구
@@ -229,10 +271,6 @@ struct EventEditorView: View {
             lines.append("이 일정에 연결된 할 일 \(attachedTaskCount)개는 삭제되지 않고 남습니다.")
         }
         return lines.joined(separator: "\n\n")
-    }
-
-    private var savedAlertBinding: Binding<Bool> {
-        Binding(get: { savedEvent != nil }, set: { if !$0 { savedEvent = nil } })
     }
 
     // MARK: - 로드 / 저장 / 삭제
@@ -313,11 +351,34 @@ struct EventEditorView: View {
                     end: range.end,
                     isAllDay: isAllDay
                 )
-                // 여기서 닫지 않는다. 딸린 할 일을 이어서 만들지 물어본다.
-                savedEvent = created
+                createDraftTasks(for: created, eventStart: range.start)
+                dismiss()
             }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// 폼에 적어둔 할 일들을 방금 만든 일정에 딸린 할 일로 만든다.
+    private func createDraftTasks(for event: EKEvent, eventStart: Date) {
+        guard let parentEventID = event.eventIdentifier else { return }
+
+        for draft in draftTasks {
+            let trimmed = draft.title.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            let offset = -TimeInterval(draft.daysBefore) * 24 * 60 * 60
+            let task = ManagedTask(
+                title: trimmed,
+                parentEventID: parentEventID,
+                parentOccurrenceDate: eventStart,
+                offsetFromParent: offset,
+                lastKnownDueAt: eventStart.addingTimeInterval(offset),
+                // 소요시간을 아직 모르므로 "그날까지"로 둔다.
+                // 착수마감이 실효마감과 같아져 그 날 「오늘 시작」에 뜬다.
+                leadTime: .fixed(days: 0)
+            )
+            modelContext.insert(task)
         }
     }
 

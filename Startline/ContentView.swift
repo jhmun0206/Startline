@@ -26,14 +26,14 @@ struct ContentView: View {
                     MonthGridView(manager: manager) { dayEvent in
                         eventToOpen = dayEvent
                     }
-                    .frame(minWidth: 480, idealWidth: 700)
+                    .frame(minWidth: 560, idealWidth: 820)
 
                     DayDetailView(manager: manager, eventToOpen: $eventToOpen)
-                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 460)
+                        .frame(minWidth: 300, idealWidth: 360, maxWidth: 520)
                 }
             }
         }
-        .frame(minWidth: 800, minHeight: 560)
+        .frame(minWidth: 940, idealWidth: 1180, minHeight: 640, idealHeight: 820)
     }
 }
 

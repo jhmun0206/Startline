@@ -18,14 +18,14 @@ struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @State private var isConfirmingDelete = false
+
     /// 편집 대상. nil 이면 새로 만든다.
     let task: ManagedTask?
     /// 새로 만들 때의 기본 마감 날짜.
     let defaultDueDate: Date
     /// 부모 일정 후보를 찾는 데 쓴다.
     let manager: CalendarManager
-    /// 방금 만든 일정을 부모로 미리 잡아둘 때 쓴다.
-    var presetParent: EKEvent?
 
     /// 「언제까지」를 정하는 두 방식. (명세서 5.3)
     private enum DueMode: Hashable {
@@ -64,11 +64,10 @@ struct TaskEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(isEditing ? "할 일 편집" : "할 일 추가")
-                .font(.headline)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
+            SheetHeader(
+                title: isEditing ? "할 일 수정" : "할 일 추가",
+                hasUnsavedInput: hasUnsavedInput
+            ) { dismiss() }
 
             Form {
                 Section {
@@ -109,9 +108,10 @@ struct TaskEditorView: View {
             Divider()
 
             HStack {
+                if isEditing {
+                    Button("삭제", role: .destructive) { isConfirmingDelete = true }
+                }
                 Spacer()
-                Button("취소") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
                 Button(isEditing ? "저장" : "추가") { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -120,6 +120,12 @@ struct TaskEditorView: View {
         }
         .frame(width: 440)
         .onAppear(perform: load)
+        .alert("이 할 일을 지울까요?", isPresented: $isConfirmingDelete) {
+            Button("지우기", role: .destructive) { delete() }
+            Button("그만두기", role: .cancel) {}
+        } message: {
+            Text("‘\(title)’를 목록에서 지워요. 연결된 일정은 그대로 남아요.")
+        }
     }
 
     // MARK: - 「언제까지」 방식 고르기
@@ -169,6 +175,9 @@ struct TaskEditorView: View {
         if let parentEvent {
             Divider()
             HStack(spacing: 6) {
+                Circle()
+                    .fill(parentEvent.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
+                    .frame(width: 9, height: 9)
                 Text(parentEvent.title ?? "(제목 없음)")
                     .font(.callout.bold())
                     .lineLimit(1)
@@ -303,12 +312,6 @@ struct TaskEditorView: View {
     // MARK: - 로드 / 저장
 
     private func load() {
-        // 방금 만든 일정에서 이어져 왔으면 그 일정을 부모로 잡고 시작한다.
-        if let presetParent {
-            dueMode = .attachedToEvent
-            parentEvent = presetParent
-        }
-
         guard let task else {
             // 새 항목의 기본 마감은 선택한 날짜의 23:59.
             var components = Calendar.current.dateComponents([.year, .month, .day], from: defaultDueDate)
@@ -348,6 +351,24 @@ struct TaskEditorView: View {
         case .durationBased: reminderChoice = nil
         default: preservedLeadTime = task.leadTime
         }
+    }
+
+    private func delete() {
+        guard let task else { return }
+        modelContext.delete(task)
+        dismiss()
+    }
+
+    /// 저장하지 않은 입력이 있는지.
+    private var hasUnsavedInput: Bool {
+        if let task {
+            return title != task.title
+                || estimatedDuration != task.estimatedDuration
+                || currentLeadTime != task.leadTime
+        }
+        return !title.trimmingCharacters(in: .whitespaces).isEmpty
+            || estimatedDuration != nil
+            || parentEvent != nil
     }
 
     private func save() {

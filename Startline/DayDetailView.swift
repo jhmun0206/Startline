@@ -79,6 +79,7 @@ struct DayDetailView: View {
                 }
             }
             .listStyle(.inset)
+            .padding(.bottom, 10)
         }
         .onReceive(clock) { now = $0 }
         .task(id: manager.displayedMonth) { syncLinks() }

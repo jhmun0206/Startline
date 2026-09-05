@@ -8,7 +8,6 @@
 //  "미팅을 잡으면서 준비할 일도 같이 만든다"는 흐름이 성립한다.
 //
 
-import EventKit
 import SwiftUI
 
 struct AddSheetView: View {
@@ -23,8 +22,6 @@ struct AddSheetView: View {
     var initialTab: Tab = .event
 
     @State private var tab: Tab = .event
-    /// 방금 만든 일정. 할 일 탭이 이 일정을 부모로 미리 잡는다.
-    @State private var presetParent: EKEvent?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,21 +38,17 @@ struct AddSheetView: View {
 
             switch tab {
             case .event:
+                // 준비 할 일은 이 폼 안에서 여러 개를 한 번에 적는다.
                 EventEditorView(
                     manager: manager,
                     event: nil,
                     defaultDate: defaultDate
-                ) { created in
-                    // 만든 일정을 부모로 잡고 할 일 탭으로 넘어간다.
-                    presetParent = created
-                    tab = .task
-                }
+                )
             case .task:
                 TaskEditorView(
                     task: nil,
                     defaultDueDate: defaultDate,
-                    manager: manager,
-                    presetParent: presetParent
+                    manager: manager
                 )
             }
         }
