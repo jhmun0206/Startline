@@ -14,6 +14,8 @@ struct DayDetailView: View {
     let manager: CalendarManager
     /// 그리드에서 클릭한 일정. 값이 들어오면 편집 시트를 연다.
     @Binding var eventToOpen: DayEvent?
+    /// 그리드에서 더블클릭한 날짜.
+    @Binding var addOnDate: Date?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(PersistenceReporter.self) private var saver
@@ -71,17 +73,17 @@ struct DayDetailView: View {
             }
 
             header
-            Divider()
 
-            List {
-                eventSection
-                if !independentTasks.isEmpty {
-                    independentSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    eventSection
+                    if !independentTasks.isEmpty {
+                        independentSection
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
             }
-            .listStyle(.inset)
-            .padding(.horizontal, 4)
-            .padding(.bottom, 20)
         }
         .onReceive(clock) { now = $0 }
         .task(id: manager.displayedMonth) { syncLinks() }
@@ -105,6 +107,10 @@ struct DayDetailView: View {
                 defaultDate: manager.selectedDate
             )
         }
+        // 그리드에서 날짜를 더블클릭한 경우. + 버튼과 같은 시트를 쓴다.
+        .sheet(item: addDateBinding) { wrapped in
+            AddSheetView(manager: manager, defaultDate: wrapped.date)
+        }
         .alert("연결된 일정이 사라졌어요", isPresented: detachedAlertBinding) {
             Button("확인") { detachedNotices = [] }
         } message: {
@@ -112,27 +118,48 @@ struct DayDetailView: View {
         }
     }
 
+    /// `sheet(item:)` 에 쓰기 위해 날짜를 Identifiable 로 감싼다.
+    private struct AddDate: Identifiable {
+        let date: Date
+        var id: TimeInterval { date.timeIntervalSinceReferenceDate }
+    }
+
+    private var addDateBinding: Binding<AddDate?> {
+        Binding(
+            get: { addOnDate.map(AddDate.init) },
+            set: { addOnDate = $0?.date }
+        )
+    }
+
     // MARK: - 2계층: 일정 + 딸린 할 일
 
     private var eventSection: some View {
-        Section("일정") {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: "일정", systemImage: "calendar")
+
             if events.isEmpty {
-                Text("일정이 없습니다.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                EmptyNote(text: "일정이 없습니다.")
             } else {
                 ForEach(events) { dayEvent in
-                    EventRow(dayEvent: dayEvent, day: manager.selectedDate)
-                        .contentShape(Rectangle())
-                        .onTapGesture { eventToOpen = dayEvent }
+                    PanelCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                                .contentShape(Rectangle())
+                                .onTapGesture { eventToOpen = dayEvent }
 
-                    ForEach(attachedTasks(for: dayEvent)) { resolved in
-                        TaskRow(
-                            resolved: resolved,
-                            isNested: true,
-                            onEdit: { editingTask = resolved.task },
-                            onDelete: { delete(resolved) }
-                        )
+                            let attached = attachedTasks(for: dayEvent)
+                            if !attached.isEmpty {
+                                Divider()
+                                ForEach(attached) { resolved in
+                                    TaskRow(
+                                        resolved: resolved,
+                                        isNested: true,
+                                        onEdit: { editingTask = resolved.task },
+                                        onDelete: { delete(resolved) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -149,41 +176,58 @@ struct DayDetailView: View {
     // MARK: - 3계층: 독립 할 일
 
     private var independentSection: some View {
-        Section {
-            TodoSectionContent(
-                tasks: independentTasks,
-                emptyText: "할 일이 없습니다.",
-                onEdit: { editingTask = $0.task },
-                onDelete: delete
-            )
-        } header: {
-            Text("할 일")
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: "할 일", systemImage: "checklist")
+
+            ForEach(independentTasks) { resolved in
+                PanelCard {
+                    TaskRow(
+                        resolved: resolved,
+                        onEdit: { editingTask = resolved.task },
+                        onDelete: { delete(resolved) }
+                    )
+                }
+            }
         }
     }
 
     // MARK: - 머리글
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(dateTitle)
                     .font(.title3.bold())
-                Spacer()
+                Spacer(minLength: 8)
                 Button {
                     isAddingItem = true
                 } label: {
-                    Image(systemName: "plus")
+                    Label("일정 추가", systemImage: "plus")
+                        .font(.callout)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.accentColor.opacity(0.14))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
+                        )
+                        .foregroundStyle(Color.accentColor)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("일정이나 할 일 추가")
             }
+
             Text("일정 \(events.count)개 · 할 일 \(independentTasks.count)개")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
     }
 
     // MARK: - 동작

@@ -77,12 +77,8 @@ final class CalendarManager {
     /// 접근 가능한 전체 캘린더 (이름 + 소스명 표시용).
     private(set) var calendars: [EKCalendar] = []
 
-    /// 현재 읽어둔 범위의 원본 일정 전체. 중복 제거 이전 상태.
-    private(set) var events: [EKEvent] = []
-
-    /// 날짜(자정 기준) → 그 날에 표시할 일정.
-    /// 여러 날에 걸친 일정은 각 날에 모두 들어가고, 캘린더 간 중복은 한 건으로 묶인다.
-    private(set) var eventsByDay: [Date: [DayEvent]] = [:]
+    /// 화면에서 숨긴 캘린더. 앱을 껐다 켜도 유지된다.
+    private(set) var hiddenCalendarIDs: Set<String> = []
 
     /// 그리드가 표시 중인 달. 항상 그 달 1일 00:00.
     private(set) var displayedMonth: Date
@@ -90,8 +86,6 @@ final class CalendarManager {
     /// 우측 상세 패널이 보여줄 날짜.
     var selectedDate: Date
 
-    /// 실제로 읽어둔 날짜 범위. 그리드에 보이는 앞뒤 달 날짜까지 포함한다.
-    private(set) var loadedRange: (start: Date, end: Date)?
 
     /// 권한 요청 중 에러가 발생한 경우의 메시지.
     private(set) var errorMessage: String?
@@ -119,6 +113,17 @@ final class CalendarManager {
     /// 디바운스용. 직전에 예약된 갱신을 취소하고 마지막 것만 실행한다.
     @ObservationIgnored private var pendingReload: Task<Void, Never>?
 
+    /// 달 → (날짜 → 그 날 표시할 일정). 스크롤로 달을 오갈 때 같은 달을 다시 읽지 않는다.
+    ///
+    /// 관찰 대상에서 뺀다. 읽는 도중에 채워지는 값이라 뷰 갱신을 유발하면 안 된다.
+    /// 대신 캐시가 비워질 때 `dataRevision` 을 올려 화면이 다시 그려지게 한다. (BL-008)
+    @ObservationIgnored private var monthCache: [Date: [Date: [DayEvent]]] = [:]
+
+    /// 캐시를 비울 때마다 오른다. 뷰는 이 값을 보고 다시 그린다.
+    private(set) var dataRevision = 0
+
+    private static let hiddenCalendarsKey = "startline.hiddenCalendarIDs"
+
     /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
     let calendar: Calendar
 
@@ -130,6 +135,10 @@ final class CalendarManager {
 
         self.displayedMonth = Self.startOfMonth(for: now, calendar: calendar)
         self.selectedDate = calendar.startOfDay(for: now)
+
+        hiddenCalendarIDs = Set(
+            UserDefaults.standard.stringArray(forKey: Self.hiddenCalendarsKey) ?? []
+        )
 
         refreshAccessState()
         if accessState == .authorized {
@@ -174,7 +183,7 @@ final class CalendarManager {
     private func applyExternalChange() {
         guard accessState == .authorized else { return }
         loadCalendars()
-        loadEventsForDisplayedMonth()   // 부모 조회 캐시도 함께 비워진다
+        invalidateEventCache()
         storeChangeToken &+= 1
     }
 
@@ -226,7 +235,6 @@ final class CalendarManager {
             selectedDate = isInDisplayedMonth(today) ? today : displayedMonth
         }
 
-        loadEventsForDisplayedMonth()
     }
 
     func goToPreviousMonth() {
@@ -249,12 +257,10 @@ final class CalendarManager {
         calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month)
     }
 
-    // MARK: - 조회
-
-    /// 캘린더 목록과 현재 표시 월의 일정을 다시 읽는다.
+    /// 캘린더 목록을 다시 읽고 일정 캐시를 비운다.
     func loadCalendarsAndEvents() {
         loadCalendars()
-        loadEventsForDisplayedMonth()
+        invalidateEventCache()
     }
 
     private func loadCalendars() {
@@ -268,46 +274,116 @@ final class CalendarManager {
             }
     }
 
-    /// 표시 월의 그리드 전체 범위(앞뒤 달의 채움 날짜 포함)를 읽는다.
-    private func loadEventsForDisplayedMonth() {
-        let days = gridDays()
-        guard let first = days.first,
-              let last = days.last,
-              let end = calendar.date(byAdding: .day, value: 1, to: last)
-        else {
-            events = []
-            eventsByDay = [:]
-            loadedRange = nil
-            return
-        }
-        loadEvents(from: first, to: end.addingTimeInterval(-1))
+    /// 읽어둔 일정을 모두 버린다. 다음 조회 때 다시 읽는다.
+    private func invalidateEventCache() {
+        monthCache.removeAll()
+        parentEventCache.removeAll()
+        dataRevision &+= 1
     }
 
-    /// 임의의 날짜 범위에 걸치는 일정을 읽는다.
-    /// - Parameters:
-    ///   - start: 범위 시작 (포함)
-    ///   - end: 범위 끝 (포함)
-    func loadEvents(from start: Date, to end: Date) {
-        guard accessState == .authorized else {
-            events = []
-            eventsByDay = [:]
-            loadedRange = nil
-            return
+    // MARK: - 캘린더 필터
+
+    /// 이 캘린더를 화면에 보여줄지.
+    func isVisible(_ calendar: EKCalendar) -> Bool {
+        !hiddenCalendarIDs.contains(calendar.calendarIdentifier)
+    }
+
+    func setVisible(_ isVisible: Bool, for calendar: EKCalendar) {
+        if isVisible {
+            hiddenCalendarIDs.remove(calendar.calendarIdentifier)
+        } else {
+            hiddenCalendarIDs.insert(calendar.calendarIdentifier)
         }
+        persistHiddenCalendars()
+    }
 
-        // calendars: nil → 접근 가능한 전체 캘린더 대상.
-        let predicate = eventStore.predicateForEvents(
-            withStart: start,
-            end: end,
-            calendars: nil
-        )
+    func showAllCalendars() {
+        hiddenCalendarIDs.removeAll()
+        persistHiddenCalendars()
+    }
 
-        events = eventStore.events(matching: predicate).sorted(by: Self.isOrderedBefore)
-        eventsByDay = bucketByDay(events, rangeStart: start, rangeEnd: end)
-        loadedRange = (start, end)
+    func hideAllCalendars() {
+        hiddenCalendarIDs = Set(calendars.map(\.calendarIdentifier))
+        persistHiddenCalendars()
+    }
 
-        // 일정을 다시 읽었으면 부모 조회 결과도 낡았다.
-        parentEventCache.removeAll()
+    private func persistHiddenCalendars() {
+        UserDefaults.standard.set(Array(hiddenCalendarIDs), forKey: Self.hiddenCalendarsKey)
+        invalidateEventCache()
+    }
+
+    // MARK: - 조회
+
+    /// 한 달 그리드 범위의 일정을 날짜별로. 같은 달을 두 번 읽지 않는다.
+    ///
+    /// 스냅 스크롤은 달을 빠르게 오가므로 캐시가 없으면 매번 EventKit을 때리게 된다. (BL-008)
+    func dayEvents(forMonth month: Date) -> [Date: [DayEvent]] {
+        let key = Self.startOfMonth(for: month, calendar: calendar)
+        if let cached = monthCache[key] { return cached }
+
+        let built = buildDayEvents(forMonth: key)
+        monthCache[key] = built
+        return built
+    }
+
+    /// 특정 날짜에 표시할 일정 (캘린더 간 중복 제거, 숨긴 캘린더 제외).
+    func events(on date: Date) -> [DayEvent] {
+        dayEvents(forMonth: date)[calendar.startOfDay(for: date)] ?? []
+    }
+
+    private func buildDayEvents(forMonth month: Date) -> [Date: [DayEvent]] {
+        guard accessState == .authorized else { return [:] }
+
+        let days = Self.gridDays(for: month, calendar: calendar)
+        guard let first = days.first,
+              let last = days.last,
+              let dayAfter = calendar.date(byAdding: .day, value: 1, to: last)
+        else { return [:] }
+
+        let end = dayAfter.addingTimeInterval(-1)
+
+        // calendars: nil → 접근 가능한 전체. 숨김 처리는 읽은 뒤에 거른다.
+        let predicate = eventStore.predicateForEvents(withStart: first, end: end, calendars: nil)
+        let events = eventStore.events(matching: predicate)
+            .filter { event in
+                guard let calendar = event.calendar else { return true }
+                return isVisible(calendar)
+            }
+            .sorted(by: Self.isOrderedBefore)
+
+        return bucketByDay(events, rangeStart: first, rangeEnd: end)
+    }
+
+    /// 임의 범위의 일정을 시간순으로 읽어 온다. 그리드 캐시를 건드리지 않는다.
+    ///
+    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (명세서 7.2와 같은 기준)
+    func fetchEvents(from start: Date, to end: Date) -> [EKEvent] {
+        guard accessState == .authorized else { return [] }
+
+        let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
+
+        var seen = Set<String>()
+        return eventStore.events(matching: predicate)
+            .filter { event in
+                guard let calendar = event.calendar else { return true }
+                return isVisible(calendar)
+            }
+            .sorted(by: Self.isOrderedChronologically)
+            .filter { seen.insert(DayEvent.groupingKey(for: $0)).inserted }
+    }
+
+    /// 부모로 고를 수 있는 일정 후보.
+    func candidateEvents(around date: Date, daysBefore: Int = 7, daysAfter: Int = 60) -> [EKEvent] {
+        let anchor = calendar.startOfDay(for: date)
+        guard let start = calendar.date(byAdding: .day, value: -daysBefore, to: anchor),
+              let end = calendar.date(byAdding: .day, value: daysAfter, to: anchor)
+        else { return [] }
+        return fetchEvents(from: start, to: end)
+    }
+
+    /// 미니 캘린더용 — 한 달 그리드 범위의 원본 일정을 날짜별로.
+    func eventsByDay(forMonth month: Date) -> [Date: [EKEvent]] {
+        dayEvents(forMonth: month).mapValues { $0.map(\.primary) }
     }
 
     // MARK: - 일정 쓰기
@@ -449,7 +525,7 @@ final class CalendarManager {
     /// 쓰기 직후에는 변경 알림을 기다리지 않고 바로 다시 읽는다.
     private func reloadAfterWrite() {
         loadCalendars()
-        loadEventsForDisplayedMonth()
+        invalidateEventCache()
         storeChangeToken &+= 1
     }
 
@@ -495,60 +571,6 @@ final class CalendarManager {
             let r = abs(($1.startDate ?? .distantPast).timeIntervalSince(occurrenceDate))
             return l < r
         } ?? base
-    }
-
-    /// 임의 범위의 일정을 시간순으로 읽어 온다. 그리드 표시 상태를 건드리지 않는다.
-    ///
-    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (명세서 6.2와 같은 기준)
-    func fetchEvents(from start: Date, to end: Date) -> [EKEvent] {
-        guard accessState == .authorized else { return [] }
-
-        let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
-
-        var seen = Set<String>()
-        return eventStore.events(matching: predicate)
-            .sorted(by: Self.isOrderedChronologically)
-            .filter { seen.insert(DayEvent.groupingKey(for: $0)).inserted }
-    }
-
-    /// 부모로 고를 수 있는 일정 후보.
-    func candidateEvents(around date: Date, daysBefore: Int = 7, daysAfter: Int = 60) -> [EKEvent] {
-        let anchor = calendar.startOfDay(for: date)
-        guard let start = calendar.date(byAdding: .day, value: -daysBefore, to: anchor),
-              let end = calendar.date(byAdding: .day, value: daysAfter, to: anchor)
-        else { return [] }
-        return fetchEvents(from: start, to: end)
-    }
-
-    /// 미니 캘린더용 — 한 달 그리드 범위의 일정을 날짜별로 묶어 돌려준다.
-    func eventsByDay(forMonth month: Date) -> [Date: [EKEvent]] {
-        let days = Self.gridDays(for: month, calendar: calendar)
-        guard let first = days.first,
-              let last = days.last,
-              let end = calendar.date(byAdding: .day, value: 1, to: last)
-        else { return [:] }
-
-        var result: [Date: [EKEvent]] = [:]
-        for event in fetchEvents(from: first, to: end.addingTimeInterval(-1)) {
-            guard let start = event.startDate else { continue }
-            var last = event.endDate ?? start
-            if !event.isAllDay, last > start, last == calendar.startOfDay(for: last) {
-                last = last.addingTimeInterval(-1)
-            }
-            var day = calendar.startOfDay(for: max(start, first))
-            let lastDay = calendar.startOfDay(for: min(last, end))
-            while day <= lastDay {
-                result[day, default: []].append(event)
-                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-                day = next
-            }
-        }
-        return result.mapValues { $0.sorted(by: Self.isOrderedBefore) }
-    }
-
-    /// 특정 날짜에 표시할 일정 (캘린더 간 중복 제거됨).
-    func events(on date: Date) -> [DayEvent] {
-        eventsByDay[calendar.startOfDay(for: date)] ?? []
     }
 
     // MARK: - 그리드 날짜 계산

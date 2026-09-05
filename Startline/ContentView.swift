@@ -16,6 +16,8 @@ struct ContentView: View {
     @State private var saver = PersistenceReporter()
     /// 그리드에서 클릭한 일정. 우측 패널이 편집 시트를 연다.
     @State private var eventToOpen: DayEvent?
+    /// 그리드에서 더블클릭한 날짜. 우측 패널이 추가 시트를 연다.
+    @State private var addOnDate: Date?
 
     var body: some View {
         Group {
@@ -27,12 +29,18 @@ struct ContentView: View {
             case .authorized:
                 // 명세서 4.2 — 좌: 월간 그리드 / 우: 선택 날짜 상세
                 HSplitView {
-                    MonthGridView(manager: manager) { dayEvent in
-                        eventToOpen = dayEvent
-                    }
+                    MonthGridView(
+                        manager: manager,
+                        onOpenEvent: { eventToOpen = $0 },
+                        onAddOnDate: { addOnDate = $0 }
+                    )
                     .frame(minWidth: 560, idealWidth: 820)
 
-                    DayDetailView(manager: manager, eventToOpen: $eventToOpen)
+                    DayDetailView(
+                        manager: manager,
+                        eventToOpen: $eventToOpen,
+                        addOnDate: $addOnDate
+                    )
                         .frame(minWidth: 300, idealWidth: 360, maxWidth: 520)
                 }
             }

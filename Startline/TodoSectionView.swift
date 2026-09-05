@@ -9,10 +9,57 @@
 import SwiftData
 import SwiftUI
 
-// MARK: - 오늘 착수
+// MARK: - 공통 부품
+
+/// 우측 패널의 한 항목을 감싸는 카드.
+/// 텍스트만 나열하면 어디까지가 한 항목인지 알 수 없다.
+struct PanelCard<Content: View>: View {
+    var tint: Color = .clear
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(tint == .clear ? Color(nsColor: .controlBackgroundColor) : tint)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+    }
+}
+
+/// 계층 제목.
+struct SectionLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+    }
+}
+
+struct EmptyNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 2)
+    }
+}
+
+// MARK: - 오늘 시작
 
 /// 명세서 5.2 1계층 — 우측 패널 최상단 고정.
-/// 사용자가 이미 아는 오늘 일정보다, 모르고 있는 착수 항목이 위에 와야 한다.
+/// 사용자가 이미 아는 오늘 일정보다, 모르고 있는 항목이 위에 와야 한다.
 /// **항목이 0개면 이 블록 자체가 사라진다.**
 struct TodayStartSection: View {
     let tasks: [ResolvedTask]
@@ -32,27 +79,35 @@ struct TodayStartSection: View {
 
     var body: some View {
         if !attentionTasks.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(.orange)
+            PanelCard(tint: Color.orange.opacity(0.10)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.orange)
 
-                // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
-                // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
-                ForEach(attentionTasks) { resolved in
-                    // "회의 장소 연락 → GDG 미팅" — 부모가 붙으면 맥락을 함께 보여준다.
-                    Text(resolved.contextualTitle)
-                        .font(.callout)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
+                    // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
+                    ForEach(attentionTasks) { resolved in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Circle()
+                                .fill(.orange)
+                                .frame(width: 5, height: 5)
+                            Text(resolved.contextualTitle)
+                                .font(.callout)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture { onSelect(resolved) }
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            )
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
         }
     }
 }
