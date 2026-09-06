@@ -7,6 +7,7 @@
 //
 
 import EventKit
+import UserNotifications
 import SwiftUI
 
 struct MonthGridView: View {
@@ -15,10 +16,11 @@ struct MonthGridView: View {
     let onOpenEvent: (DayEvent) -> Void
     /// 빈 곳을 더블클릭해 그 날짜로 새 항목을 만들 때.
     let onAddOnDate: (Date) -> Void
+    let scheduler: NotificationScheduler
 
     var body: some View {
         VStack(spacing: 0) {
-            MonthHeaderView(manager: manager)
+            MonthHeaderView(manager: manager, scheduler: scheduler)
             Divider()
             WeekdayHeaderView(headers: manager.weekdayHeaders())
             Divider()
@@ -76,8 +78,10 @@ struct MonthGridView: View {
 
 private struct MonthHeaderView: View {
     let manager: CalendarManager
+    let scheduler: NotificationScheduler
 
     @State private var isShowingCalendarList = false
+    @State private var isShowingNotifications = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -130,6 +134,18 @@ private struct MonthHeaderView: View {
             }
 
             Button {
+                isShowingNotifications.toggle()
+            } label: {
+                Image(systemName: notificationIcon)
+            }
+            .buttonStyle(.borderless)
+            .help("알림 상태")
+            .padding(.leading, 10)
+            .popover(isPresented: $isShowingNotifications, arrowEdge: .bottom) {
+                NotificationStatusView(scheduler: scheduler)
+            }
+
+            Button {
                 manager.loadCalendarsAndEvents()
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -143,6 +159,15 @@ private struct MonthHeaderView: View {
     }
 
     private var hasHiddenCalendars: Bool { !manager.hiddenCalendarIDs.isEmpty }
+
+    /// 알림이 꺼져 있으면 한눈에 보이게 한다.
+    private var notificationIcon: String {
+        switch scheduler.authorization {
+        case .denied: return "bell.slash"
+        case .notDetermined: return "bell"
+        default: return "bell.badge"
+        }
+    }
 
     private var monthTitle: String {
         Self.monthFormatter.string(from: manager.displayedMonth)

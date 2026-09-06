@@ -13,7 +13,7 @@ import Foundation
 import SwiftData
 
 /// 부모 일정까지 반영해 계산이 끝난 할 일.
-struct ResolvedTask: Identifiable {
+nonisolated struct ResolvedTask: Identifiable {
     let task: ManagedTask
     /// 명세서 4.2의 실효마감.
     let effectiveDueAt: Date?

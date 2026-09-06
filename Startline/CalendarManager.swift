@@ -10,7 +10,7 @@ import EventKit
 import Foundation
 import Observation
 
-extension Locale {
+nonisolated extension Locale {
     /// 화면 표시 문자열에 쓰는 고정 로케일.
     /// 시스템 캘린더 설정(주 시작 요일 등)은 그대로 따르되, 문자열만 한국어로 고정한다.
     static let startlineDisplay = Locale(identifier: "ko_KR")

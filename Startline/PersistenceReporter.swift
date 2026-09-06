@@ -19,6 +19,9 @@ final class PersistenceReporter {
     /// 마지막 저장 실패 메시지. 화면이 이 값을 보고 알린다.
     var lastErrorMessage: String?
 
+    /// 저장이 일어날 때마다 오른다. 알림 재계산 같은 후속 작업이 이 값을 본다.
+    private(set) var revision = 0
+
     /// 변경을 즉시 디스크에 쓴다.
     ///
     /// 바뀐 게 없으면 아무 일도 하지 않는다.
@@ -27,6 +30,7 @@ final class PersistenceReporter {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            revision &+= 1
         } catch {
             lastErrorMessage = "저장하지 못했어요. \(error.localizedDescription)"
         }

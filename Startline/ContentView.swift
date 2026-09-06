@@ -12,8 +12,12 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
 
+    @Query private var allTasks: [ManagedTask]
+
     @State private var manager = CalendarManager()
     @State private var saver = PersistenceReporter()
+    /// 알림 액션 처리기와 같은 인스턴스를 쓴다.
+    private var scheduler: NotificationScheduler { AppDelegate.scheduler }
     /// 그리드에서 클릭한 일정. 우측 패널이 편집 시트를 연다.
     @State private var eventToOpen: DayEvent?
     /// 그리드에서 더블클릭한 날짜. 우측 패널이 추가 시트를 연다.
@@ -32,7 +36,8 @@ struct ContentView: View {
                     MonthGridView(
                         manager: manager,
                         onOpenEvent: { eventToOpen = $0 },
-                        onAddOnDate: { addOnDate = $0 }
+                        onAddOnDate: { addOnDate = $0 },
+                        scheduler: scheduler
                     )
                     .frame(minWidth: 560, idealWidth: 820)
 
@@ -47,6 +52,14 @@ struct ContentView: View {
         }
         .frame(minWidth: 940, idealWidth: 1180, minHeight: 640, idealHeight: 820)
         .environment(saver)
+        // 명세서 9.2 롤링 스케줄러 — 아래 시점마다 전체를 다시 계산해 예약한다.
+        .task { await rescheduleNotifications() }
+        .onChange(of: saver.revision) { _, _ in
+            Task { await rescheduleNotifications() }
+        }
+        .onChange(of: manager.storeChangeToken) { _, _ in
+            Task { await rescheduleNotifications() }
+        }
         // 앱이 닫히거나 뒤로 물러날 때 미저장 변경을 마저 쓴다.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             saver.commit(modelContext)
@@ -59,6 +72,12 @@ struct ContentView: View {
         } message: {
             Text(saver.lastErrorMessage ?? "")
         }
+    }
+
+    /// 할 일 전체를 부모 일정까지 반영해 계산한 뒤 알림을 다시 깐다.
+    private func rescheduleNotifications() async {
+        let resolver = TaskResolver(manager: manager, now: Date())
+        await scheduler.reschedule(for: resolver.resolve(allTasks))
     }
 
     private var saveErrorBinding: Binding<Bool> {

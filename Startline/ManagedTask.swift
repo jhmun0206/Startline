@@ -323,7 +323,7 @@ struct DurationPreset: Identifiable {
 
 // MARK: - 표시 형식
 
-enum StartlineFormat {
+nonisolated enum StartlineFormat {
 
     /// "9월 23일 (수) 14:00"
     static let dayTime: DateFormatter = {
