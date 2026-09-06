@@ -46,8 +46,27 @@ struct EventEditorView: View {
     struct DraftTask: Identifiable {
         let id = UUID()
         var title = ""
+        /// 부모 일정 기준 며칠 전까지가 **마감**인지.
         var daysBefore = 1
+        /// 소요시간. 고르면 착수일 역산이 켜진다.
+        var duration: TimeInterval?
+        /// 직접 입력 줄을 펼쳤는지.
+        var isEnteringCustom = false
+        var hours = 0
+        var minutes = 0
+
+        /// 직접 입력값을 반영한 최종 소요시간.
+        var resolvedDuration: TimeInterval? {
+            if isEnteringCustom {
+                let total = TimeInterval(hours * 3600 + minutes * 60)
+                return total > 0 ? total : nil
+            }
+            return duration
+        }
     }
+
+    /// 폼 한 줄에 들어가는 프리셋. 폭이 좁아 셋으로 줄였다.
+    private static let inlinePresets: [DurationPreset] = Array(DurationPreset.all.prefix(3))
 
     private var isEditing: Bool { event != nil }
 
@@ -144,7 +163,7 @@ struct EventEditorView: View {
                     whenField
                     calendarField
 
-                    if !isEditing { draftTaskSection }
+                    taskSection
                     if isRecurring { recurringNote }
                     if !isRangeValid {
                         errorNote("끝나는 시각이 시작하는 시각보다 빨라요.")
@@ -262,41 +281,27 @@ struct EventEditorView: View {
 
     // MARK: - 이 일정 전에 할 일
 
-    /// 일정을 만들면서 준비 작업을 여러 개 한꺼번에 적는다.
-    /// 저장하면 모두 이 일정에 딸린 할 일로 만들어진다. (명세서 8장)
+    /// 이 일정 전에 미리 할 일.
     ///
-    /// 이 블록만 설명 문구를 남긴다. 빈 칸만 있으면 무엇을 적는 자리인지 알 수 없다.
-    private var draftTaskSection: some View {
+    /// 만들 때뿐 아니라 **고칠 때도 붙일 수 있어야 한다.** 이미 연결된 할 일은
+    /// 여기서 바로 고치고 지운다. (명세서 8장)
+    private var taskSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("이 일정 전에 미리 할 일")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            ForEach(attachedTasks) { task in
+                AttachedTaskRow(
+                    task: task,
+                    eventStart: resolvedRange().start,
+                    calendar: manager.calendar,
+                    onDelete: { delete(task) }
+                )
+            }
+
             ForEach($draftTasks) { $draft in
-                SheetField(verticalPadding: 5) {
-                    HStack(spacing: 6) {
-                        TextField("무엇을 미리 해둘까요", text: $draft.title)
-                            .textFieldStyle(.plain)
-                            .font(.callout)
-
-                        Stepper(value: $draft.daysBefore, in: 0...365) {
-                            Text(draft.daysBefore == 0 ? "당일" : "\(draft.daysBefore)일 전")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, alignment: .trailing)
-                        }
-                        .fixedSize()
-
-                        Button {
-                            draftTasks.removeAll { $0.id == draft.id }
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.borderless)
-                        .help("이 줄 지우기")
-                    }
-                }
+                draftRow($draft)
             }
 
             Button {
@@ -309,7 +314,111 @@ struct EventEditorView: View {
         }
     }
 
-    /// 끝이 시작보다 이르면 저장을 막는다.
+    /// 한 줄에 제목 · 마감 시점 · 소요시간을 모두 담는다.
+    private func draftRow(_ draft: Binding<DraftTask>) -> some View {
+        SheetField(verticalPadding: 5) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    TextField("무엇을 미리 해둘까요", text: draft.title)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+
+                    Stepper(value: draft.daysBefore, in: 0...365) {
+                        // "며칠 전"이 마감이라는 것을 문구로 드러낸다.
+                        Text(draft.wrappedValue.daysBefore == 0 ? "당일까지" : "\(draft.wrappedValue.daysBefore)일 전까지")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 62, alignment: .trailing)
+                    }
+                    .fixedSize()
+
+                    Button {
+                        draftTasks.removeAll { $0.id == draft.wrappedValue.id }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("이 줄 지우기")
+                }
+
+                HStack(spacing: 4) {
+                    Text("얼마나")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Self.inlinePresets) { preset in
+                        durationChip(preset.label, draft: draft) {
+                            draft.wrappedValue.duration == preset.duration
+                                && !draft.wrappedValue.isEnteringCustom
+                        } action: {
+                            draft.wrappedValue.isEnteringCustom = false
+                            draft.wrappedValue.duration =
+                                draft.wrappedValue.duration == preset.duration ? nil : preset.duration
+                        }
+                    }
+
+                    durationChip("직접", draft: draft) {
+                        draft.wrappedValue.isEnteringCustom
+                    } action: {
+                        draft.wrappedValue.isEnteringCustom.toggle()
+                        if draft.wrappedValue.isEnteringCustom { draft.wrappedValue.duration = nil }
+                    }
+
+                    if draft.wrappedValue.isEnteringCustom {
+                        TextField("0", value: draft.hours, format: .number)
+                            .textFieldStyle(.plain)
+                            .frame(width: 26)
+                            .multilineTextAlignment(.trailing)
+                        Text("시간").font(.caption2)
+                        TextField("0", value: draft.minutes, format: .number)
+                            .textFieldStyle(.plain)
+                            .frame(width: 26)
+                            .multilineTextAlignment(.trailing)
+                        Text("분").font(.caption2)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func durationChip(
+        _ label: String,
+        draft: Binding<DraftTask>,
+        isOn: () -> Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        let on = isOn()
+        return Text(label)
+            .font(.caption2)
+            .fontWeight(on ? .semibold : .regular)
+            .foregroundStyle(on ? Color.accentColor : .secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(on ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture(perform: action)
+    }
+
+    /// 이 일정에 이미 붙어 있는 할 일.
+    private var attachedTasks: [ManagedTask] {
+        guard let identifier = event?.eventIdentifier else { return [] }
+        return allTasks
+            .filter { $0.parentEventID == identifier }
+            .sorted { ($0.dueAt ?? .distantFuture) < ($1.dueAt ?? .distantFuture) }
+    }
+
+    private func delete(_ task: ManagedTask) {
+        modelContext.delete(task)
+        saver.commit(modelContext)
+    }
+
+    /// 끝이 시작보다 이르면 저장을 막는다.    /// 끝이 시작보다 이르면 저장을 막는다.
     private var isRangeValid: Bool {
         let range = resolvedRange()
         return range.end >= range.start
@@ -428,6 +537,7 @@ struct EventEditorView: View {
                     isAllDay: isAllDay,
                     span: .thisEvent
                 )
+                createDraftTasks(for: event, eventStart: range.start)
                 dismiss()
             } else {
                 let created = try manager.createEvent(
@@ -445,7 +555,7 @@ struct EventEditorView: View {
         }
     }
 
-    /// 폼에 적어둔 할 일들을 방금 만든 일정에 딸린 할 일로 만든다.
+    /// 폼에 적어둔 할 일들을 이 일정에 딸린 할 일로 만든다.
     private func createDraftTasks(for event: EKEvent, eventStart: Date) {
         guard let parentEventID = event.eventIdentifier else { return }
 
@@ -454,18 +564,21 @@ struct EventEditorView: View {
             guard !trimmed.isEmpty else { continue }
 
             let offset = -TimeInterval(draft.daysBefore) * 24 * 60 * 60
+            let duration = draft.resolvedDuration
+
             let task = ManagedTask(
                 title: trimmed,
                 parentEventID: parentEventID,
                 parentOccurrenceDate: eventStart,
                 offsetFromParent: offset,
                 lastKnownDueAt: eventStart.addingTimeInterval(offset),
-                // 소요시간을 아직 모르므로 "그날까지"로 둔다.
-                // 착수마감이 실효마감과 같아져 그 날 「오늘 시작」에 뜬다.
-                leadTime: .fixed(days: 0)
+                estimatedDuration: duration,
+                // 소요시간을 골랐으면 역산한다. 아니면 그날까지 하는 일로 둔다.
+                leadTime: duration == nil ? .fixed(days: 0) : .durationBased
             )
             modelContext.insert(task)
         }
+        draftTasks.removeAll()
         saver.commit(modelContext)
     }
 
@@ -486,4 +599,64 @@ struct EventEditorView: View {
         f.dateFormat = "HH:mm"
         return f
     }()
+}
+
+// MARK: - 이미 붙어 있는 할 일 한 줄
+
+/// 일정 수정 시트에서 연결된 할 일을 바로 고치고 지운다.
+private struct AttachedTaskRow: View {
+    @Bindable var task: ManagedTask
+    /// 부모 일정 시작시각. 「며칠 전」을 상대값으로 되돌리는 기준이다.
+    let eventStart: Date
+    let calendar: Calendar
+    let onDelete: () -> Void
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(PersistenceReporter.self) private var saver
+
+    private var daysBefore: Binding<Int> {
+        Binding(
+            get: {
+                guard let offset = task.offsetFromParent else { return 0 }
+                return max(0, Int((-offset / (24 * 60 * 60)).rounded()))
+            },
+            set: { newValue in
+                let offset = -TimeInterval(newValue) * 24 * 60 * 60
+                task.offsetFromParent = offset
+                task.dueAt = eventStart.addingTimeInterval(offset)
+                saver.commit(modelContext)
+            }
+        )
+    }
+
+    var body: some View {
+        SheetField(verticalPadding: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(task.status == .done ? Color.accentColor : .secondary)
+
+                TextField("제목", text: $task.title)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .strikethrough(task.status == .done)
+                    .onSubmit { saver.commit(modelContext) }
+
+                Stepper(value: daysBefore, in: 0...365) {
+                    Text(daysBefore.wrappedValue == 0 ? "당일까지" : "\(daysBefore.wrappedValue)일 전까지")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 62, alignment: .trailing)
+                }
+                .fixedSize()
+
+                Button(action: onDelete) {
+                    Image(systemName: "minus.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("이 할 일 지우기")
+            }
+        }
+    }
 }

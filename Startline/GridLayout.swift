@@ -4,18 +4,45 @@
 //
 //  월간 그리드 한 주의 배치 계산.
 //
-//  칸마다 따로 그리면 여러 날에 걸친 일정이 날마다 반복돼 보인다.
+//  칸마다 따로 그리면 여러 날에 걸친 것이 날마다 반복돼 보인다.
 //  주 단위로 레인을 배정해 시작일부터 종료일까지 한 줄로 잇는다.
+//
+//  할 일과 일정은 **레인 밴드를 나눈다.** 할 일 막대를 더 얇게 그려
+//  같은 칸 높이에 더 많이 들어가게 하고, 할 일 밴드를 위에 둔다.
 //
 
 import EventKit
 import Foundation
 
+/// 그리드에 놓이는 할 일 하나. 시작일부터 마감일까지 뻗는다.
+nonisolated struct GridTaskItem {
+    let resolved: ResolvedTask
+    /// 막대가 시작하는 날 (보통 착수마감일).
+    let startDay: Date
+    /// 막대가 끝나는 날 (마감일). `startDay` 와 같으면 점 하나로 그린다.
+    let endDay: Date
+    /// 시작 시점이 지나 오늘 칸에 덧붙인 것인지.
+    let isEcho: Bool
+
+    var key: String { "\(resolved.id.uuidString)|\(isEcho ? "echo" : "main")" }
+}
+
 /// 그리드 막대 하나가 나타내는 것.
 nonisolated enum GridItemKind {
     case event(DayEvent)
-    /// 할 일. 그리드에는 **마감일이 아니라 시작일**에 놓인다.
-    case task(ResolvedTask)
+    case task(GridTaskItem)
+}
+
+/// 막대 굵기와 간격.
+nonisolated struct GridMetrics {
+    var eventBarHeight: CGFloat = 15
+    /// 할 일은 더 얇게. 레인을 덜 먹어야 점선이 며칠씩 뻗어도 칸이 버틴다.
+    var taskBarHeight: CGFloat = 11
+    var spacing: CGFloat = 2
+    var numberRowHeight: CGFloat = 20
+    /// 일정이 있을 때 일정 몫으로 남겨 두는 최소 레인 수.
+    /// 할 일이 칸을 통째로 먹어 일정이 전부 `+N` 으로 밀리는 것을 막는다.
+    var reservedEventLanes: Int = 2
 }
 
 /// 한 주 안에서 막대 하나가 차지하는 자리.
@@ -25,11 +52,10 @@ nonisolated struct GridSegment: Identifiable {
     /// 주 안에서의 열 범위 (0 = 첫 요일).
     let startColumn: Int
     let endColumn: Int
-    /// 위에서 몇 번째 줄에 놓이는지.
-    let lane: Int
-    /// 이 주 이전부터 이어져 오는지.
+    /// 칸 위쪽에서의 세로 위치와 굵기.
+    let y: CGFloat
+    let height: CGFloat
     let continuesBefore: Bool
-    /// 이 주 다음으로 이어지는지.
     let continuesAfter: Bool
 
     var columnSpan: Int { endColumn - startColumn + 1 }
@@ -39,66 +65,73 @@ nonisolated struct WeekLayout {
     let segments: [GridSegment]
     /// 열 → 자리가 모자라 감춰진 개수.
     let overflowByColumn: [Int: Int]
+    /// `+N` 을 그릴 세로 위치.
+    let overflowY: CGFloat
 
     /// 한 주치 배치를 계산한다.
-    ///
-    /// - Parameters:
-    ///   - days: 그 주의 7일.
-    ///   - dayEvents: 날짜별 일정.
-    ///   - dayTasks: 날짜별 할 일.
-    ///   - capacity: 한 칸에 들어가는 막대 줄 수.
     static func build(
         days: [Date],
         dayEvents: [Date: [DayEvent]],
-        dayTasks: [Date: [ResolvedTask]],
-        capacity: Int,
+        tasks: [GridTaskItem],
+        availableHeight: CGFloat,
+        metrics: GridMetrics = GridMetrics(),
         calendar: Calendar
     ) -> WeekLayout {
         guard let weekStart = days.first, let weekEnd = days.last else {
-            return WeekLayout(segments: [], overflowByColumn: [:])
+            return WeekLayout(segments: [], overflowByColumn: [:], overflowY: 0)
         }
 
-        var placed: [(item: PendingItem, lane: Int)] = []
-        var pending = collect(
+        let weekStartDay = calendar.startOfDay(for: weekStart)
+        let weekEndDay = calendar.startOfDay(for: weekEnd)
+        let body = max(0, availableHeight - metrics.numberRowHeight - 3)
+
+        // ── 할 일 밴드 ──
+        let taskItems = pendingTasks(
+            tasks,
             days: days,
-            dayEvents: dayEvents,
-            dayTasks: dayTasks,
-            weekStart: weekStart,
-            weekEnd: weekEnd,
+            weekStart: weekStartDay,
+            weekEnd: weekEndDay,
             calendar: calendar
         )
+        let taskLanes = assignLanes(taskItems)
+        let taskStride = metrics.taskBarHeight + metrics.spacing
 
-        // 긴 것부터 자리를 잡아야 짧은 것들이 빈틈에 들어간다.
-        pending.sort { lhs, rhs in
-            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
-            let lspan = lhs.endColumn - lhs.startColumn
-            let rspan = rhs.endColumn - rhs.startColumn
-            if lspan != rspan { return lspan > rspan }
-            if lhs.startColumn != rhs.startColumn { return lhs.startColumn < rhs.startColumn }
-            return lhs.id < rhs.id
-        }
+        // ── 일정 밴드 ──
+        let eventItems = pendingEvents(
+            days: days,
+            dayEvents: dayEvents,
+            weekStart: weekStartDay,
+            weekEnd: weekEndDay,
+            calendar: calendar
+        )
+        let eventLanes = assignLanes(eventItems)
+        let eventStride = metrics.eventBarHeight + metrics.spacing
 
-        // 겹치지 않는 가장 위쪽 레인에 배정한다.
-        for item in pending {
-            var lane = 0
-            while placed.contains(where: { $0.lane == lane && $0.item.overlaps(item) }) {
-                lane += 1
-            }
-            placed.append((item, lane))
-        }
+        // 일정이 있을 때만 그 몫을 남긴다. 할 일뿐이면 칸을 다 쓴다.
+        // 할 일 막대가 더 얇으므로 같은 높이에 더 많이 들어간다.
+        let eventLaneNeed = laneCount(eventLanes)
+        let reserved = eventLaneNeed > 0
+            ? CGFloat(min(eventLaneNeed, metrics.reservedEventLanes)) * eventStride
+            : 0
+
+        let taskCapacity = max(0, Int((body - reserved) / taskStride))
+        let usedTaskLanes = min(laneCount(taskLanes), taskCapacity)
+        let taskBandHeight = CGFloat(usedTaskLanes) * taskStride
+        let eventCapacity = max(0, Int((body - taskBandHeight) / eventStride))
 
         var segments: [GridSegment] = []
         var overflow: [Int: Int] = [:]
 
-        for (item, lane) in placed {
-            if lane < capacity {
+        for (item, lane) in taskLanes {
+            if lane < taskCapacity {
                 segments.append(
                     GridSegment(
                         id: item.id,
                         kind: item.kind,
                         startColumn: item.startColumn,
                         endColumn: item.endColumn,
-                        lane: lane,
+                        y: metrics.numberRowHeight + CGFloat(lane) * taskStride,
+                        height: metrics.taskBarHeight,
                         continuesBefore: item.continuesBefore,
                         continuesAfter: item.continuesAfter
                     )
@@ -110,10 +143,39 @@ nonisolated struct WeekLayout {
             }
         }
 
-        return WeekLayout(segments: segments, overflowByColumn: overflow)
+        for (item, lane) in eventLanes {
+            if lane < eventCapacity {
+                segments.append(
+                    GridSegment(
+                        id: item.id,
+                        kind: item.kind,
+                        startColumn: item.startColumn,
+                        endColumn: item.endColumn,
+                        y: metrics.numberRowHeight + taskBandHeight + CGFloat(lane) * eventStride,
+                        height: metrics.eventBarHeight,
+                        continuesBefore: item.continuesBefore,
+                        continuesAfter: item.continuesAfter
+                    )
+                )
+            } else {
+                for column in item.startColumn...item.endColumn {
+                    overflow[column, default: 0] += 1
+                }
+            }
+        }
+
+        let overflowY = metrics.numberRowHeight
+            + taskBandHeight
+            + CGFloat(min(laneCount(eventLanes), eventCapacity)) * eventStride
+
+        return WeekLayout(
+            segments: segments,
+            overflowByColumn: overflow,
+            overflowY: overflowY
+        )
     }
 
-    // MARK: - 수집
+    // MARK: - 레인 배정
 
     private struct PendingItem {
         let id: String
@@ -122,43 +184,83 @@ nonisolated struct WeekLayout {
         let endColumn: Int
         let continuesBefore: Bool
         let continuesAfter: Bool
-        /// 낮을수록 위. 할 일을 일정보다 위에 둔다 — 이 앱의 차별점이 착수일이다.
-        let priority: Int
+        let sortKey: String
 
         func overlaps(_ other: PendingItem) -> Bool {
             startColumn <= other.endColumn && other.startColumn <= endColumn
         }
     }
 
-    private static func collect(
+    /// 긴 것부터 자리를 잡아야 짧은 것들이 빈틈에 들어간다.
+    private static func assignLanes(_ items: [PendingItem]) -> [(item: PendingItem, lane: Int)] {
+        let sorted = items.sorted { lhs, rhs in
+            let lspan = lhs.endColumn - lhs.startColumn
+            let rspan = rhs.endColumn - rhs.startColumn
+            if lspan != rspan { return lspan > rspan }
+            if lhs.startColumn != rhs.startColumn { return lhs.startColumn < rhs.startColumn }
+            return lhs.sortKey < rhs.sortKey
+        }
+
+        var placed: [(item: PendingItem, lane: Int)] = []
+        for item in sorted {
+            var lane = 0
+            while placed.contains(where: { $0.lane == lane && $0.item.overlaps(item) }) {
+                lane += 1
+            }
+            placed.append((item, lane))
+        }
+        return placed
+    }
+
+    private static func laneCount(_ placed: [(item: PendingItem, lane: Int)]) -> Int {
+        (placed.map(\.lane).max().map { $0 + 1 }) ?? 0
+    }
+
+    // MARK: - 수집
+
+    private static func pendingTasks(
+        _ tasks: [GridTaskItem],
+        days: [Date],
+        weekStart: Date,
+        weekEnd: Date,
+        calendar: Calendar
+    ) -> [PendingItem] {
+        tasks.compactMap { item in
+            let start = calendar.startOfDay(for: item.startDay)
+            let end = calendar.startOfDay(for: max(item.endDay, item.startDay))
+
+            // 이 주와 겹치지 않으면 뺀다.
+            guard start <= weekEnd, end >= weekStart else { return nil }
+
+            let visibleStart = max(start, weekStart)
+            let visibleEnd = min(end, weekEnd)
+
+            guard let startColumn = column(of: visibleStart, days: days, calendar: calendar),
+                  let endColumn = column(of: visibleEnd, days: days, calendar: calendar)
+            else { return nil }
+
+            return PendingItem(
+                id: "task|\(item.key)",
+                kind: .task(item),
+                startColumn: startColumn,
+                endColumn: endColumn,
+                continuesBefore: start < weekStart,
+                continuesAfter: end > weekEnd,
+                sortKey: item.resolved.task.title
+            )
+        }
+    }
+
+    private static func pendingEvents(
         days: [Date],
         dayEvents: [Date: [DayEvent]],
-        dayTasks: [Date: [ResolvedTask]],
         weekStart: Date,
         weekEnd: Date,
         calendar: Calendar
     ) -> [PendingItem] {
         var items: [PendingItem] = []
-
-        // 할 일 — 하루짜리다.
-        for (column, day) in days.enumerated() {
-            for resolved in dayTasks[calendar.startOfDay(for: day)] ?? [] {
-                items.append(
-                    PendingItem(
-                        id: "task|\(resolved.id.uuidString)|\(column)",
-                        kind: .task(resolved),
-                        startColumn: column,
-                        endColumn: column,
-                        continuesBefore: false,
-                        continuesAfter: false,
-                        priority: 0
-                    )
-                )
-            }
-        }
-
-        // 일정 — 같은 일정이 여러 날에 나타나므로 주 안에서 한 번만 모은다.
         var seen = Set<String>()
+
         for (column, day) in days.enumerated() {
             for dayEvent in dayEvents[calendar.startOfDay(for: day)] ?? [] {
                 guard seen.insert(dayEvent.id).inserted else { continue }
@@ -182,15 +284,18 @@ nonisolated struct WeekLayout {
                         kind: .event(dayEvent),
                         startColumn: span.start,
                         endColumn: span.end,
-                        continuesBefore: start.map { $0 < calendar.startOfDay(for: weekStart) } ?? false,
-                        continuesAfter: end.map { $0 > calendar.startOfDay(for: weekEnd) } ?? false,
-                        priority: 1
+                        continuesBefore: start.map { $0 < weekStart } ?? false,
+                        continuesAfter: end.map { $0 > weekEnd } ?? false,
+                        sortKey: dayEvent.id
                     )
                 )
             }
         }
-
         return items
+    }
+
+    private static func column(of day: Date, days: [Date], calendar: Calendar) -> Int? {
+        days.firstIndex { calendar.isDate($0, inSameDayAs: day) }
     }
 
     /// 이 주 안에서 그 일정이 놓이는 열 범위.

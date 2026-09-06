@@ -83,6 +83,10 @@ final class CalendarManager {
     /// 그리드에 할 일을 보여줄지. 기본값은 켜짐.
     private(set) var showsTasks = true
 
+    /// 할 일을 시작일부터 마감일까지 점선으로 이을지.
+    /// 점선이 며칠씩 뻗으면 레인이 빨리 차므로 끌 수 있게 둔다.
+    private(set) var showsTaskSpan = true
+
     /// 그리드가 표시 중인 달. 항상 그 달 1일 00:00.
     private(set) var displayedMonth: Date
 
@@ -127,6 +131,7 @@ final class CalendarManager {
 
     private static let hiddenCalendarsKey = "startline.hiddenCalendarIDs"
     private static let showsTasksKey = "startline.showsTasks"
+    private static let showsTaskSpanKey = "startline.showsTaskSpan"
 
     /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
     let calendar: Calendar
@@ -145,6 +150,7 @@ final class CalendarManager {
         )
         // 저장된 적이 없으면 켜짐이 기본이다.
         showsTasks = UserDefaults.standard.object(forKey: Self.showsTasksKey) as? Bool ?? true
+        showsTaskSpan = UserDefaults.standard.object(forKey: Self.showsTaskSpanKey) as? Bool ?? true
 
         refreshAccessState()
         if accessState == .authorized {
@@ -316,6 +322,11 @@ final class CalendarManager {
     func setShowsTasks(_ isVisible: Bool) {
         showsTasks = isVisible
         UserDefaults.standard.set(isVisible, forKey: Self.showsTasksKey)
+    }
+
+    func setShowsTaskSpan(_ isVisible: Bool) {
+        showsTaskSpan = isVisible
+        UserDefaults.standard.set(isVisible, forKey: Self.showsTaskSpanKey)
     }
 
     private func persistHiddenCalendars() {

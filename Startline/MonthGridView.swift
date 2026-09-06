@@ -56,7 +56,7 @@ struct MonthGridView: View {
         let days = CalendarManager.gridDays(for: month, calendar: calendar)
         let weeks = days.chunked(into: 7)
         let dayEvents = manager.dayEvents(forMonth: month)
-        let dayTasks = manager.showsTasks ? taskMap(in: days) : [:]
+        let tasks = manager.showsTasks ? taskItems(in: days) : []
 
         return VStack(spacing: 0) {
             ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
@@ -64,7 +64,7 @@ struct MonthGridView: View {
                     manager: manager,
                     days: week,
                     dayEvents: dayEvents,
-                    dayTasks: dayTasks,
+                    tasks: tasks,
                     now: now,
                     selectionRange: dragRange,
                     onSelect: { day in
@@ -138,54 +138,49 @@ struct MonthGridView: View {
 
     // MARK: - 할 일 배치
 
-    /// 할 일을 그리드 날짜에 배정한다.
+    /// 할 일을 그리드에 배정한다.
     ///
-    /// **마감일이 아니라 시작일에 놓는다.** 마감일에 찍으면 일반 투두 앱과 다를 게 없다.
-    /// 리드타임이 없으면 시작일 자체가 없으므로 마감일에 놓는다.
-    /// 시작일이 지났는데 아직 시작하지 않았으면 오늘 칸에도 함께 띄운다 — 놓치면 안 되므로.
-    private func taskMap(in days: [Date]) -> [Date: [ResolvedTask]] {
-        guard let first = days.first, let last = days.last else { return [:] }
+    /// **마감일이 아니라 시작일에서 출발한다.** 마감일에만 찍으면 일반 투두 앱과 다를 게 없다.
+    /// 시작일부터 마감일까지 점선으로 이어 "언제부터 언제까지"가 한눈에 보이게 한다.
+    /// 리드타임이 없으면 시작일 자체가 없으므로 마감일에 점 하나만 찍는다.
+    /// 시작 시점이 지났는데 아직 시작하지 않았으면 오늘 칸에도 함께 띄운다 — 놓치면 안 되므로.
+    private func taskItems(in days: [Date]) -> [GridTaskItem] {
+        guard let first = days.first, let last = days.last else { return [] }
 
         let resolver = TaskResolver(manager: manager, now: now)
-        let range = calendar.startOfDay(for: first)...calendar.startOfDay(for: last)
+        let rangeStart = calendar.startOfDay(for: first)
+        let rangeEnd = calendar.startOfDay(for: last)
         let today = calendar.startOfDay(for: now)
 
-        var map: [Date: [ResolvedTask]] = [:]
+        var items: [GridTaskItem] = []
 
         for resolved in resolver.resolve(allTasks) {
-            guard let anchor = gridDate(for: resolved) else { continue }
+            guard let due = resolved.effectiveDueAt.map({ calendar.startOfDay(for: $0) })
+            else { continue }
 
-            if range.contains(anchor) {
-                map[anchor, default: []].append(resolved)
+            // 착수마감이 없으면(리드타임 없음) 마감일에 점 하나.
+            let start = resolved.startDeadline.map { calendar.startOfDay(for: $0) } ?? due
+            // 점선 표시를 끄면 시작 지점만 남긴다.
+            let end = manager.showsTaskSpan ? max(start, due) : start
+
+            if start <= rangeEnd, end >= rangeStart {
+                items.append(
+                    GridTaskItem(resolved: resolved, startDay: start, endDay: end, isEcho: false)
+                )
             }
 
-            // 시작 시점이 지났는데 미시작이면 오늘 칸에도 보여준다.
             if resolved.task.status == .notStarted,
                let startDeadline = resolved.startDeadline,
                startDeadline < now,
-               anchor != today,
-               range.contains(today) {
-                map[today, default: []].append(resolved)
+               start != today,
+               today >= rangeStart, today <= rangeEnd {
+                items.append(
+                    GridTaskItem(resolved: resolved, startDay: today, endDay: today, isEcho: true)
+                )
             }
         }
 
-        for (day, list) in map {
-            map[day] = list.sorted { lhs, rhs in
-                let l = lhs.startDeadline ?? lhs.effectiveDueAt ?? .distantFuture
-                let r = rhs.startDeadline ?? rhs.effectiveDueAt ?? .distantFuture
-                if l != r { return l < r }
-                return lhs.task.title < rhs.task.title
-            }
-        }
-        return map
-    }
-
-    private func gridDate(for resolved: ResolvedTask) -> Date? {
-        if case .none = resolved.task.leadTime {
-            return resolved.effectiveDueAt.map { calendar.startOfDay(for: $0) }
-        }
-        let anchor = resolved.startDeadline ?? resolved.effectiveDueAt
-        return anchor.map { calendar.startOfDay(for: $0) }
+        return items
     }
 }
 
@@ -195,7 +190,7 @@ private struct WeekRow: View {
     let manager: CalendarManager
     let days: [Date]
     let dayEvents: [Date: [DayEvent]]
-    let dayTasks: [Date: [ResolvedTask]]
+    let tasks: [GridTaskItem]
     let now: Date
     let selectionRange: ClosedRange<Date>?
     let onSelect: (Date) -> Void
@@ -203,37 +198,35 @@ private struct WeekRow: View {
     let onOpenEvent: (DayEvent) -> Void
     let onOpenTask: (ResolvedTask) -> Void
 
-    static let barHeight: CGFloat = 15
-    static let barSpacing: CGFloat = 2
-    static let numberRowHeight: CGFloat = 20
+    static let metrics = GridMetrics()
 
     private var calendar: Calendar { manager.calendar }
 
     var body: some View {
         GeometryReader { proxy in
             let columnWidth = proxy.size.width / 7
-            let capacity = Self.capacity(forHeight: proxy.size.height)
             let layout = WeekLayout.build(
                 days: days,
                 dayEvents: dayEvents,
-                dayTasks: dayTasks,
-                capacity: capacity,
+                tasks: tasks,
+                availableHeight: proxy.size.height,
+                metrics: Self.metrics,
                 calendar: calendar
             )
 
             ZStack(alignment: .topLeading) {
                 cellBackgrounds
 
-                // 막대는 칸 위에 겹쳐 그린다. 주 경계를 넘는 일정도 한 줄로 이어진다.
+                // 막대는 칸 위에 겹쳐 그린다. 주 경계를 넘는 것도 한 줄로 이어진다.
                 ForEach(layout.segments) { segment in
                     segmentView(segment)
                         .frame(
                             width: max(0, columnWidth * CGFloat(segment.columnSpan) - 4),
-                            height: Self.barHeight
+                            height: segment.height
                         )
                         .offset(
                             x: columnWidth * CGFloat(segment.startColumn) + 2,
-                            y: Self.numberRowHeight + CGFloat(segment.lane) * (Self.barHeight + Self.barSpacing)
+                            y: segment.y
                         )
                 }
 
@@ -245,7 +238,7 @@ private struct WeekRow: View {
                             .frame(width: max(0, columnWidth - 8), alignment: .leading)
                             .offset(
                                 x: columnWidth * CGFloat(column) + 4,
-                                y: Self.numberRowHeight + CGFloat(capacity) * (Self.barHeight + Self.barSpacing)
+                                y: layout.overflowY
                             )
                     }
                 }
@@ -281,17 +274,17 @@ private struct WeekRow: View {
                 continuesAfter: segment.continuesAfter,
                 onOpen: { onOpenEvent(dayEvent) }
             )
-        case .task(let resolved):
-            TaskBar(resolved: resolved, onOpen: { onOpenTask(resolved) })
+        case .task(let item):
+            TaskBar(
+                item: item,
+                isSpanning: segment.columnSpan > 1 || segment.continuesBefore || segment.continuesAfter,
+                continuesBefore: segment.continuesBefore,
+                continuesAfter: segment.continuesAfter,
+                onOpen: { onOpenTask(item.resolved) }
+            )
         }
     }
 
-    /// 날짜 숫자 줄을 뺀 나머지에 몇 줄이 들어가는지.
-    static func capacity(forHeight height: CGFloat) -> Int {
-        let available = height - numberRowHeight - barSpacing - 3
-        guard available > 0 else { return 0 }
-        return max(0, Int((available + barSpacing) / (barHeight + barSpacing)))
-    }
 }
 
 // MARK: - 날짜 칸 배경
@@ -322,7 +315,7 @@ private struct DayCellBackground: View {
                 Spacer(minLength: 0)
             }
             .padding(.leading, 4)
-            .frame(height: WeekRow.numberRowHeight)
+            .frame(height: WeekRow.metrics.numberRowHeight)
 
             Spacer(minLength: 0)
         }
@@ -435,36 +428,63 @@ private struct EventBar: View {
 
 /// 할 일 막대.
 ///
-/// 일정과 한눈에 구분되어야 한다. 일정은 채운 색, 할 일은 **테두리 + 체크 아이콘**이다.
+/// 일정과 한눈에 구분되어야 한다. 일정은 채운 색 실선, 할 일은 **점 + 점선**이다.
+///
+/// ```
+/// ● 할 일 제목 ┄┄┄┄┄┄┄┄ ●
+/// 착수일                마감일
+/// ```
+///
 /// 색은 판정을 따른다 — 여유 / 오늘 시작 / 늦음 / 완료.
 private struct TaskBar: View {
-    let resolved: ResolvedTask
+    let item: GridTaskItem
+    /// 시작일과 마감일이 다른가. 같으면 점선 없이 점 하나로 끝낸다.
+    let isSpanning: Bool
+    let continuesBefore: Bool
+    let continuesAfter: Bool
     let onOpen: () -> Void
 
+    private var resolved: ResolvedTask { item.resolved }
     private var task: ManagedTask { resolved.task }
     private var isDone: Bool { task.status == .done }
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 8, weight: .bold))
+            // 시작 지점. 앞 주에서 이어져 왔으면 점을 찍지 않는다.
+            if !continuesBefore {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle.fill")
+                    .font(.system(size: 7, weight: .bold))
+            }
+
             Text(task.title)
                 .font(.system(size: 10, weight: .medium))
                 .strikethrough(isDone)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Spacer(minLength: 0)
+                .layoutPriority(1)
+
+            if isSpanning {
+                // 마감까지 점선으로 잇는다. 일정 막대의 실선과 구분된다.
+                DashedRule()
+                    .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                    .frame(height: 1.2)
+                    .frame(maxWidth: .infinity)
+
+                // 마감 지점. 다음 주로 이어지면 점을 찍지 않는다.
+                if !continuesAfter {
+                    Circle()
+                        .frame(width: 5, height: 5)
+                }
+            } else {
+                Spacer(minLength: 0)
+            }
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 3)
-                .fill(tint.opacity(0.12))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+                .fill(tint.opacity(item.isEcho ? 0.06 : 0.10))
         )
         .opacity(isDone ? 0.55 : 1)
         .contentShape(Rectangle())
@@ -487,7 +507,21 @@ private struct TaskBar: View {
         if let deadline = resolved.startDeadline {
             parts.append("\(StartlineFormat.spokenDayTime(deadline))에 시작")
         }
+        if let due = resolved.effectiveDueAt {
+            parts.append("\(StartlineFormat.spokenDayTime(due))까지")
+        }
+        if item.isEcho { parts.append("(시작 시점이 지났어요)") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// 가로 점선 한 줄.
+private struct DashedRule: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
     }
 }
 
@@ -630,7 +664,7 @@ private struct MonthHeaderView: View {
     }
 
     private var hasFilters: Bool {
-        !manager.hiddenCalendarIDs.isEmpty || !manager.showsTasks
+        !manager.hiddenCalendarIDs.isEmpty || !manager.showsTasks || !manager.showsTaskSpan
     }
 
     /// 알림이 꺼져 있으면 한눈에 보이게 한다.
@@ -688,6 +722,17 @@ struct CalendarFilterList: View {
                 }
             }
             .toggleStyle(.checkbox)
+
+            Toggle(isOn: Binding(
+                get: { manager.showsTaskSpan },
+                set: { manager.setShowsTaskSpan($0) }
+            )) {
+                Text("마감까지 점선 표시")
+                    .font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!manager.showsTasks)
+            .padding(.leading, 16)
 
             Divider()
 
