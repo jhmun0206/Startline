@@ -146,6 +146,9 @@ struct TaskRow: View {
     let resolved: ResolvedTask
     /// 일정 아래에 딸린 할 일이면 들여쓴다.
     var isNested = false
+    /// 「할 일」 섹션에서는 부모 일정명을 함께 보여준다.
+    /// 부모 카드 아래에서는 이미 맥락이 있으므로 붙이지 않는다.
+    var showsParentContext = false
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -167,7 +170,7 @@ struct TaskRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(task.title)
+                    Text(showsParentContext ? resolved.contextualTitle : task.title)
                         .font(isNested ? .callout : .body)
                         .strikethrough(task.status == .done)
                         .foregroundStyle(task.status == .done ? .secondary : .primary)

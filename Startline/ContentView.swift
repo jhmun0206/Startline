@@ -45,7 +45,7 @@ struct ContentView: View {
                         onOpenTask: { taskToOpen = $0.task },
                         scheduler: scheduler
                     )
-                    .frame(minWidth: 560, idealWidth: 820)
+                    .frame(minWidth: 640, idealWidth: 1000)
 
                     DayDetailView(
                         manager: manager,
@@ -58,7 +58,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 940, idealWidth: 1180, minHeight: 640, idealHeight: 820)
+        .frame(minWidth: 1040, idealWidth: 1400, minHeight: 700, idealHeight: 940)
         .environment(saver)
         // 명세서 9.2 롤링 스케줄러 — 아래 시점마다 전체를 다시 계산해 예약한다.
         .task { await rescheduleNotifications() }

@@ -50,15 +50,52 @@ struct DayDetailView: View {
         resolver.resolve(allTasks)
     }
 
-    /// 3계층 중 3계층 — 부모 없는 독립 할 일 가운데 선택 날짜가 마감인 것.
-    private var independentTasks: [ResolvedTask] {
-        resolvedTasks
-            .filter { !$0.isAttached }
-            .filter { resolved in
-                guard let due = resolved.effectiveDueAt else { return false }
-                return manager.calendar.isDate(due, inSameDayAs: manager.selectedDate)
+    /// 3계층 — 이 날 챙겨야 할 할 일.
+    ///
+    /// **착수일이 이 날인 것을 반드시 포함한다.** 이 앱은 착수일 관리가 존재 이유인데,
+    /// 딸린 할 일을 부모 일정 카드 아래에만 두면 착수일 화면에서 그 할 일이 보이지 않는다.
+    /// 부모 일정이 있는 날에 가야만 보이는 것은 정면으로 어긋난다.
+    ///
+    /// 포함 대상:
+    /// - 이 날이 착수일인 할 일 (부모가 있든 없든)
+    /// - 이 날이 마감일인 할 일
+    /// - 착수일이 지났는데 아직 시작하지 않은 할 일 (오늘을 보고 있을 때)
+    ///
+    /// 부모 일정 카드 아래에도 나오는 것은 의도된 동작이다 — 일정 관점과 할 일 관점 둘 다 필요하다.
+    /// 다만 같은 날 화면에 두 번 나오지는 않게 한다.
+    private var sectionTasks: [ResolvedTask] {
+        let nestedIDs = Set(events.flatMap { attachedTasks(for: $0) }.map(\.id))
+
+        return resolvedTasks
+            .filter { !nestedIDs.contains($0.id) }
+            .filter(matchesSelectedDay)
+            .sorted { lhs, rhs in
+                let l = lhs.startDeadline ?? lhs.effectiveDueAt ?? .distantFuture
+                let r = rhs.startDeadline ?? rhs.effectiveDueAt ?? .distantFuture
+                if l != r { return l < r }
+                return lhs.task.title < rhs.task.title
             }
-            .sorted { ($0.effectiveDueAt ?? .distantFuture) < ($1.effectiveDueAt ?? .distantFuture) }
+    }
+
+    private func matchesSelectedDay(_ resolved: ResolvedTask) -> Bool {
+        let selected = manager.selectedDate
+
+        if let startDeadline = resolved.startDeadline,
+           manager.calendar.isDate(startDeadline, inSameDayAs: selected) {
+            return true
+        }
+        if let due = resolved.effectiveDueAt,
+           manager.calendar.isDate(due, inSameDayAs: selected) {
+            return true
+        }
+        // 시작 시점을 놓친 것은 오늘 화면에서 계속 보여야 한다.
+        if resolved.task.status == .notStarted,
+           let startDeadline = resolved.startDeadline,
+           startDeadline < now,
+           manager.calendar.isDateInToday(selected) {
+            return true
+        }
+        return false
     }
 
     /// 부모 일정 식별자 → 딸린 할 일. 2계층에서 일정 아래 들여쓰기로 붙인다.
@@ -81,8 +118,8 @@ struct DayDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     eventSection
-                    if !independentTasks.isEmpty {
-                        independentSection
+                    if !sectionTasks.isEmpty {
+                        taskSection
                     }
                 }
                 .padding(.horizontal, 20)
@@ -205,16 +242,17 @@ struct DayDetailView: View {
             .sorted { ($0.effectiveDueAt ?? .distantFuture) < ($1.effectiveDueAt ?? .distantFuture) }
     }
 
-    // MARK: - 3계층: 독립 할 일
+    // MARK: - 3계층: 이 날의 할 일
 
-    private var independentSection: some View {
+    private var taskSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(title: "할 일", systemImage: "checklist")
 
-            ForEach(independentTasks) { resolved in
+            ForEach(sectionTasks) { resolved in
                 PanelCard {
                     TaskRow(
                         resolved: resolved,
+                        showsParentContext: true,
                         onEdit: { editingTask = resolved.task },
                         onDelete: { delete(resolved) }
                     )
@@ -252,7 +290,7 @@ struct DayDetailView: View {
                 .help("일정이나 할 일 추가")
             }
 
-            Text("일정 \(events.count)개 · 할 일 \(independentTasks.count)개")
+            Text("일정 \(events.count)개 · 할 일 \(sectionTasks.count)개")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

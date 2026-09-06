@@ -198,28 +198,28 @@ private struct WeekRow: View {
     let onOpenEvent: (DayEvent) -> Void
     let onOpenTask: (ResolvedTask) -> Void
 
-    static let metrics = GridMetrics()
-
     private var calendar: Calendar { manager.calendar }
 
     var body: some View {
         GeometryReader { proxy in
             let columnWidth = proxy.size.width / 7
+            // 칸이 커지면 막대도 글자도 함께 커진다.
+            let metrics = GridMetrics.forRowHeight(proxy.size.height)
             let layout = WeekLayout.build(
                 days: days,
                 dayEvents: dayEvents,
                 tasks: tasks,
                 availableHeight: proxy.size.height,
-                metrics: Self.metrics,
+                metrics: metrics,
                 calendar: calendar
             )
 
             ZStack(alignment: .topLeading) {
-                cellBackgrounds
+                cellBackgrounds(metrics)
 
                 // 막대는 칸 위에 겹쳐 그린다. 주 경계를 넘는 것도 한 줄로 이어진다.
                 ForEach(layout.segments) { segment in
-                    segmentView(segment)
+                    segmentView(segment, metrics: metrics)
                         .frame(
                             width: max(0, columnWidth * CGFloat(segment.columnSpan) - 4),
                             height: segment.height
@@ -233,7 +233,7 @@ private struct WeekRow: View {
                 ForEach(Array(layout.overflowByColumn.keys.sorted()), id: \.self) { column in
                     if let count = layout.overflowByColumn[column] {
                         Text("+\(count)")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: metrics.titleFontSize, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .frame(width: max(0, columnWidth - 8), alignment: .leading)
                             .offset(
@@ -246,10 +246,11 @@ private struct WeekRow: View {
         }
     }
 
-    private var cellBackgrounds: some View {
+    private func cellBackgrounds(_ metrics: GridMetrics) -> some View {
         HStack(spacing: 0) {
             ForEach(days, id: \.timeIntervalSinceReferenceDate) { day in
                 DayCellBackground(
+                    metrics: metrics,
                     date: day,
                     dayNumber: calendar.component(.day, from: day),
                     isInMonth: manager.isInDisplayedMonth(day),
@@ -264,10 +265,11 @@ private struct WeekRow: View {
     }
 
     @ViewBuilder
-    private func segmentView(_ segment: GridSegment) -> some View {
+    private func segmentView(_ segment: GridSegment, metrics: GridMetrics) -> some View {
         switch segment.kind {
         case .event(let dayEvent):
             EventBar(
+                metrics: metrics,
                 dayEvent: dayEvent,
                 isDimmed: !manager.isInDisplayedMonth(days[segment.startColumn]),
                 continuesBefore: segment.continuesBefore,
@@ -276,6 +278,7 @@ private struct WeekRow: View {
             )
         case .task(let item):
             TaskBar(
+                metrics: metrics,
                 item: item,
                 isSpanning: segment.columnSpan > 1 || segment.continuesBefore || segment.continuesAfter,
                 continuesBefore: segment.continuesBefore,
@@ -290,6 +293,7 @@ private struct WeekRow: View {
 // MARK: - 날짜 칸 배경
 
 private struct DayCellBackground: View {
+    let metrics: GridMetrics
     let date: Date
     let dayNumber: Int
     let isInMonth: Bool
@@ -303,9 +307,9 @@ private struct DayCellBackground: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("\(dayNumber)")
-                    .font(.system(size: 12, weight: isToday ? .bold : .regular))
+                    .font(.system(size: metrics.dayNumberFontSize, weight: isToday ? .bold : .regular))
                     .foregroundStyle(numberColor)
-                    .frame(width: 19, height: 19)
+                    .frame(width: metrics.dayNumberFontSize + 7, height: metrics.dayNumberFontSize + 7)
                     .background {
                         if isToday {
                             // 선택 표시가 파란 테두리라, 오늘은 빨강으로 구분한다.
@@ -315,7 +319,7 @@ private struct DayCellBackground: View {
                 Spacer(minLength: 0)
             }
             .padding(.leading, 4)
-            .frame(height: WeekRow.metrics.numberRowHeight)
+            .frame(height: metrics.numberRowHeight)
 
             Spacer(minLength: 0)
         }
@@ -352,6 +356,7 @@ private struct DayCellBackground: View {
 
 /// 일정 막대. 채워진 색으로 그린다.
 private struct EventBar: View {
+    let metrics: GridMetrics
     let dayEvent: DayEvent
     let isDimmed: Bool
     let continuesBefore: Bool
@@ -371,7 +376,7 @@ private struct EventBar: View {
             }
             // 제목은 막대 시작 부분에 한 번만.
             Text(title)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: metrics.titleFontSize, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
@@ -437,12 +442,16 @@ private struct EventBar: View {
 ///
 /// 색은 판정을 따른다 — 여유 / 오늘 시작 / 늦음 / 완료.
 private struct TaskBar: View {
+    let metrics: GridMetrics
     let item: GridTaskItem
     /// 시작일과 마감일이 다른가. 같으면 점선 없이 점 하나로 끝낸다.
     let isSpanning: Bool
     let continuesBefore: Bool
     let continuesAfter: Bool
     let onOpen: () -> Void
+
+    @State private var isShowingPreview = false
+    @State private var hoverDelay: Task<Void, Never>?
 
     private var resolved: ResolvedTask { item.resolved }
     private var task: ManagedTask { resolved.task }
@@ -457,7 +466,7 @@ private struct TaskBar: View {
             }
 
             Text(task.title)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: metrics.titleFontSize, weight: .medium))
                 .strikethrough(isDone)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -488,8 +497,31 @@ private struct TaskBar: View {
         )
         .opacity(isDone ? 0.55 : 1)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onOpen)
-        .help(helpText)
+        .onTapGesture {
+            cancelHover()
+            onOpen()
+        }
+        .onHover { hovering in
+            if hovering {
+                hoverDelay?.cancel()
+                hoverDelay = Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run { isShowingPreview = true }
+                }
+            } else {
+                cancelHover()
+            }
+        }
+        .popover(isPresented: $isShowingPreview, arrowEdge: .trailing) {
+            TaskPreviewCard(resolved: resolved, isEcho: item.isEcho)
+        }
+    }
+
+    private func cancelHover() {
+        hoverDelay?.cancel()
+        hoverDelay = nil
+        isShowingPreview = false
     }
 
     private var tint: Color {
@@ -501,18 +533,6 @@ private struct TaskBar: View {
         }
     }
 
-    private var helpText: String {
-        var parts = [task.title]
-        if let parentTitle = resolved.parentTitle { parts.append("→ \(parentTitle)") }
-        if let deadline = resolved.startDeadline {
-            parts.append("\(StartlineFormat.spokenDayTime(deadline))에 시작")
-        }
-        if let due = resolved.effectiveDueAt {
-            parts.append("\(StartlineFormat.spokenDayTime(due))까지")
-        }
-        if item.isEcho { parts.append("(시작 시점이 지났어요)") }
-        return parts.joined(separator: " · ")
-    }
 }
 
 /// 가로 점선 한 줄.
@@ -820,5 +840,86 @@ extension Array {
         return stride(from: 0, to: count, by: size).map {
             Array(self[$0..<Swift.min($0 + size, count)])
         }
+    }
+}
+
+/// 할 일에 마우스를 올렸을 때 나오는 미리보기.
+/// 일정과 마찬가지로 여기서는 고치지 않는다.
+struct TaskPreviewCard: View {
+    let resolved: ResolvedTask
+    var isEcho = false
+
+    private var task: ManagedTask { resolved.task }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 그리드에서 잘려 보이던 제목을 온전히 보여준다.
+            Text(task.title)
+                .font(.headline)
+                .strikethrough(task.status == .done)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let parentTitle = resolved.parentTitle {
+                Label(parentTitle, systemImage: "calendar")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let startDeadline = resolved.startDeadline {
+                Label(
+                    "\(StartlineFormat.spokenDayTime(startDeadline))에 시작",
+                    systemImage: "flag"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            if let due = resolved.effectiveDueAt {
+                Label(
+                    "\(StartlineFormat.spokenDayTime(due))까지",
+                    systemImage: "checkmark.circle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            if let duration = task.estimatedDuration {
+                Label(
+                    "\(StartlineFormat.duration(duration)) 걸림",
+                    systemImage: "hourglass"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 6) {
+                if task.status == .done {
+                    Text("완료")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.secondary)
+                } else if task.status == .inProgress {
+                    Text(TaskStatus.inProgress.label)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.18), in: Capsule())
+                        .foregroundStyle(Color.accentColor)
+                } else if let judgment = resolved.judgment {
+                    JudgmentBadge(judgment: judgment)
+                }
+
+                if isEcho {
+                    Text("시작 시점이 지났어요")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 200, maxWidth: 320, alignment: .leading)
     }
 }

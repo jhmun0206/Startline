@@ -42,6 +42,27 @@ struct EventEditorView: View {
     /// 일정을 저장할 때 함께 만들 할 일들. 폼 안에서 여러 개를 한 번에 적는다.
     @State private var draftTasks: [DraftTask] = []
 
+    /// 이미 연결된 할 일의 편집 사본.
+    ///
+    /// 모델에 직접 묶으면 저장 버튼을 누르기 전에 반영돼, 일정 본문과 기준이 어긋난다.
+    /// 시트 안에서는 사본만 고치고 저장할 때 한꺼번에 반영한다. (BL-037)
+    @State private var linkedEdits: [LinkedTaskEdit] = []
+    @State private var didLoadLinked = false
+
+    /// 연결된 할 일 한 건의 편집 상태.
+    struct LinkedTaskEdit: Identifiable {
+        let id: UUID
+        let task: ManagedTask
+        var title: String
+        var daysBefore: Int
+        let originalTitle: String
+        let originalDaysBefore: Int
+
+        var isChanged: Bool {
+            title != originalTitle || daysBefore != originalDaysBefore
+        }
+    }
+
     /// 폼 안에서만 쓰는 할 일 초안.
     struct DraftTask: Identifiable {
         let id = UUID()
@@ -94,6 +115,7 @@ struct EventEditorView: View {
         }
         .frame(width: SheetMetrics.width)
         .onAppear(perform: load)
+        .onAppear(perform: loadLinkedTasks)
     }
 
     // MARK: - 읽기 전용
@@ -291,13 +313,11 @@ struct EventEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(attachedTasks) { task in
-                AttachedTaskRow(
-                    task: task,
-                    eventStart: resolvedRange().start,
-                    calendar: manager.calendar,
-                    onDelete: { delete(task) }
-                )
+            ForEach($linkedEdits) { $edit in
+                AttachedTaskRow(edit: $edit) {
+                    // 지우기는 저장할 때 반영된다.
+                    linkedEdits.removeAll { $0.id == edit.id }
+                }
             }
 
             ForEach($draftTasks) { $draft in
@@ -413,12 +433,46 @@ struct EventEditorView: View {
             .sorted { ($0.dueAt ?? .distantFuture) < ($1.dueAt ?? .distantFuture) }
     }
 
-    private func delete(_ task: ManagedTask) {
-        modelContext.delete(task)
-        saver.commit(modelContext)
+    /// 연결된 할 일을 편집 사본으로 옮긴다.
+    private func loadLinkedTasks() {
+        guard !didLoadLinked else { return }
+        didLoadLinked = true
+
+        let dayLength: TimeInterval = 24 * 60 * 60
+        linkedEdits = attachedTasks.map { task in
+            let days = task.offsetFromParent.map { max(0, Int((-$0 / dayLength).rounded())) } ?? 0
+            return LinkedTaskEdit(
+                id: task.id,
+                task: task,
+                title: task.title,
+                daysBefore: days,
+                originalTitle: task.title,
+                originalDaysBefore: days
+            )
+        }
     }
 
-    /// 끝이 시작보다 이르면 저장을 막는다.    /// 끝이 시작보다 이르면 저장을 막는다.
+    /// 저장 시점에 연결된 할 일 변경을 한꺼번에 반영한다.
+    private func applyLinkedEdits(eventStart: Date) {
+        let dayLength: TimeInterval = 24 * 60 * 60
+        let keptIDs = Set(linkedEdits.map(\.id))
+
+        // 목록에서 뺀 것은 지운다.
+        for task in attachedTasks where !keptIDs.contains(task.id) {
+            modelContext.delete(task)
+        }
+
+        for edit in linkedEdits where edit.isChanged {
+            let trimmed = edit.title.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { edit.task.title = trimmed }
+
+            let offset = -TimeInterval(edit.daysBefore) * dayLength
+            edit.task.offsetFromParent = offset
+            edit.task.dueAt = eventStart.addingTimeInterval(offset)
+        }
+    }
+
+    /// 끝이 시작보다 이르면 저장을 막는다.
     private var isRangeValid: Bool {
         let range = resolvedRange()
         return range.end >= range.start
@@ -428,6 +482,11 @@ struct EventEditorView: View {
     private var hasUnsavedInput: Bool {
         if isEditing {
             guard let event else { return false }
+            if linkedEdits.contains(where: \.isChanged) { return true }
+            if linkedEdits.count != attachedTasks.count { return true }
+            if draftTasks.contains(where: { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                return true
+            }
             return title != (event.title ?? "")
                 || isAllDay != event.isAllDay
                 || !manager.calendar.isDate(startDay, inSameDayAs: event.startDate ?? startDay)
@@ -537,7 +596,9 @@ struct EventEditorView: View {
                     isAllDay: isAllDay,
                     span: .thisEvent
                 )
+                applyLinkedEdits(eventStart: range.start)
                 createDraftTasks(for: event, eventStart: range.start)
+                saver.commit(modelContext)
                 dismiss()
             } else {
                 let created = try manager.createEvent(
@@ -603,54 +664,35 @@ struct EventEditorView: View {
 
 // MARK: - 이미 붙어 있는 할 일 한 줄
 
-/// 일정 수정 시트에서 연결된 할 일을 바로 고치고 지운다.
+/// 일정 수정 시트에서 연결된 할 일을 고친다.
+///
+/// **모델이 아니라 편집 사본에 묶는다.** 저장을 눌러야 반영되는 일정 본문과
+/// 기준을 맞추기 위해서다. 그만두면 아무것도 남지 않는다. (BL-037)
 private struct AttachedTaskRow: View {
-    @Bindable var task: ManagedTask
-    /// 부모 일정 시작시각. 「며칠 전」을 상대값으로 되돌리는 기준이다.
-    let eventStart: Date
-    let calendar: Calendar
-    let onDelete: () -> Void
-
-    @Environment(\.modelContext) private var modelContext
-    @Environment(PersistenceReporter.self) private var saver
-
-    private var daysBefore: Binding<Int> {
-        Binding(
-            get: {
-                guard let offset = task.offsetFromParent else { return 0 }
-                return max(0, Int((-offset / (24 * 60 * 60)).rounded()))
-            },
-            set: { newValue in
-                let offset = -TimeInterval(newValue) * 24 * 60 * 60
-                task.offsetFromParent = offset
-                task.dueAt = eventStart.addingTimeInterval(offset)
-                saver.commit(modelContext)
-            }
-        )
-    }
+    @Binding var edit: EventEditorView.LinkedTaskEdit
+    let onRemove: () -> Void
 
     var body: some View {
         SheetField(verticalPadding: 5) {
             HStack(spacing: 6) {
-                Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
+                Image(systemName: edit.task.status == .done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 10))
-                    .foregroundStyle(task.status == .done ? Color.accentColor : .secondary)
+                    .foregroundStyle(edit.task.status == .done ? Color.accentColor : .secondary)
 
-                TextField("제목", text: $task.title)
+                TextField("제목", text: $edit.title)
                     .textFieldStyle(.plain)
                     .font(.callout)
-                    .strikethrough(task.status == .done)
-                    .onSubmit { saver.commit(modelContext) }
+                    .strikethrough(edit.task.status == .done)
 
-                Stepper(value: daysBefore, in: 0...365) {
-                    Text(daysBefore.wrappedValue == 0 ? "당일까지" : "\(daysBefore.wrappedValue)일 전까지")
+                Stepper(value: $edit.daysBefore, in: 0...365) {
+                    Text(edit.daysBefore == 0 ? "당일까지" : "\(edit.daysBefore)일 전까지")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(width: 62, alignment: .trailing)
                 }
                 .fixedSize()
 
-                Button(action: onDelete) {
+                Button(action: onRemove) {
                     Image(systemName: "minus.circle")
                         .foregroundStyle(.secondary)
                 }
