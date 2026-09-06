@@ -21,13 +21,16 @@ struct EventEditorView: View {
     let manager: CalendarManager
     /// 고칠 일정. nil 이면 새로 만든다.
     let event: EKEvent?
-    /// 새로 만들 때의 기준 날짜.
+    /// 새로 만들 때의 기준 시작 날짜.
     let defaultDate: Date
+    /// 드래그로 고른 기간의 마지막 날. 없으면 하루짜리.
+    var defaultEndDate: Date?
 
     @Query private var allTasks: [ManagedTask]
 
     @State private var title = ""
-    @State private var day = Date()
+    @State private var startDay = Date()
+    @State private var endDay = Date()
     @State private var startTime = Date()
     @State private var endTime = Date()
     @State private var isAllDay = false
@@ -143,6 +146,9 @@ struct EventEditorView: View {
 
                     if !isEditing { draftTaskSection }
                     if isRecurring { recurringNote }
+                    if !isRangeValid {
+                        errorNote("끝나는 시각이 시작하는 시각보다 빨라요.")
+                    }
                     if let errorMessage { errorNote(errorMessage) }
                 }
                 .padding(.horizontal, SheetMetrics.padding)
@@ -166,21 +172,35 @@ struct EventEditorView: View {
         }
     }
 
-    /// "2026. 9. 23.  오전 9:00 ~ 오전 10:00" 을 한 줄로.
+    /// 시작과 끝을 각각 날짜 + 시각으로 받는다. 여러 날에 걸친 일정을 만들 수 있어야 한다.
     private var whenField: some View {
         SheetField {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    DatePicker("", selection: $day, displayedComponents: .date)
+                    Text("시작")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, alignment: .leading)
+                    DatePicker("", selection: $startDay, displayedComponents: .date)
                         .labelsHidden()
                         .datePickerStyle(.field)
-
                     if !isAllDay {
                         DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                             .datePickerStyle(.field)
-                        Text("~")
-                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 6) {
+                    Text("끝")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, alignment: .leading)
+                    DatePicker("", selection: $endDay, displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+                    if !isAllDay {
                         DatePicker("", selection: $endTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                             .datePickerStyle(.field)
@@ -234,7 +254,8 @@ struct EventEditorView: View {
             Button(isEditing ? "저장" : "만들기") { save() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty
-                          || manager.writableCalendars.isEmpty)
+                          || manager.writableCalendars.isEmpty
+                          || !isRangeValid)
         }
         .padding(16)
     }
@@ -288,13 +309,19 @@ struct EventEditorView: View {
         }
     }
 
+    /// 끝이 시작보다 이르면 저장을 막는다.
+    private var isRangeValid: Bool {
+        let range = resolvedRange()
+        return range.end >= range.start
+    }
+
     /// 저장하지 않은 입력이 있는지. 닫기를 눌렀을 때 되물을지 판단한다.
     private var hasUnsavedInput: Bool {
         if isEditing {
             guard let event else { return false }
             return title != (event.title ?? "")
                 || isAllDay != event.isAllDay
-                || !manager.calendar.isDate(day, inSameDayAs: event.startDate ?? day)
+                || !manager.calendar.isDate(startDay, inSameDayAs: event.startDate ?? startDay)
         }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
             || draftTasks.contains { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -326,24 +353,32 @@ struct EventEditorView: View {
         let calendar = manager.calendar
 
         guard let event else {
-            day = defaultDate
+            startDay = defaultDate
+            endDay = defaultEndDate ?? defaultDate
             startTime = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: defaultDate) ?? defaultDate
             endTime = calendar.date(bySettingHour: 11, minute: 0, second: 0, of: defaultDate) ?? defaultDate
+            // 드래그로 여러 날을 고른 경우엔 종일 일정이 자연스럽다.
+            isAllDay = defaultEndDate.map { !calendar.isDate($0, inSameDayAs: defaultDate) } ?? false
             selectedCalendarID = manager.defaultWritableCalendar?.calendarIdentifier
             return
         }
 
         title = event.title ?? ""
         isAllDay = event.isAllDay
-        day = event.startDate ?? defaultDate
-        startTime = event.startDate ?? defaultDate
-        endTime = event.endDate ?? startTime
+
+        let start = event.startDate ?? defaultDate
+        let end = WeekLayout.adjustedEnd(of: event, calendar: calendar) ?? start
+
+        startDay = start
+        startTime = start
+        endDay = end
+        endTime = end
         selectedCalendarID = event.calendar?.calendarIdentifier
             ?? manager.defaultWritableCalendar?.calendarIdentifier
     }
 
-    /// 날짜는 `day` 에서, 시각은 `startTime`/`endTime` 에서 가져와 합친다.
-    private func combined(_ time: Date) -> Date {
+    /// 날짜와 시각을 합친다.
+    private func combined(day: Date, time: Date) -> Date {
         let calendar = manager.calendar
         let dayParts = calendar.dateComponents([.year, .month, .day], from: day)
         let timeParts = calendar.dateComponents([.hour, .minute], from: time)
@@ -359,10 +394,14 @@ struct EventEditorView: View {
 
     private func resolvedRange() -> (start: Date, end: Date) {
         let calendar = manager.calendar
-        guard isAllDay else { return (combined(startTime), combined(endTime)) }
+        guard isAllDay else {
+            return (combined(day: startDay, time: startTime), combined(day: endDay, time: endTime))
+        }
 
-        let start = calendar.startOfDay(for: day)
-        let end = calendar.date(byAdding: .day, value: 1, to: start)?.addingTimeInterval(-1) ?? start
+        let start = calendar.startOfDay(for: startDay)
+        let lastDay = calendar.startOfDay(for: max(endDay, startDay))
+        let end = calendar.date(byAdding: .day, value: 1, to: lastDay)?
+            .addingTimeInterval(-1) ?? start
         return (start, end)
     }
 

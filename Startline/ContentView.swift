@@ -22,6 +22,10 @@ struct ContentView: View {
     @State private var eventToOpen: DayEvent?
     /// 그리드에서 더블클릭한 날짜. 우측 패널이 추가 시트를 연다.
     @State private var addOnDate: Date?
+    /// 그리드에서 드래그로 고른 기간.
+    @State private var addRange: ClosedRange<Date>?
+    /// 그리드에서 클릭한 할 일.
+    @State private var taskToOpen: ManagedTask?
 
     var body: some View {
         Group {
@@ -37,6 +41,8 @@ struct ContentView: View {
                         manager: manager,
                         onOpenEvent: { eventToOpen = $0 },
                         onAddOnDate: { addOnDate = $0 },
+                        onAddRange: { addRange = $0...$1 },
+                        onOpenTask: { taskToOpen = $0.task },
                         scheduler: scheduler
                     )
                     .frame(minWidth: 560, idealWidth: 820)
@@ -44,7 +50,9 @@ struct ContentView: View {
                     DayDetailView(
                         manager: manager,
                         eventToOpen: $eventToOpen,
-                        addOnDate: $addOnDate
+                        addOnDate: $addOnDate,
+                        addRange: $addRange,
+                        taskToOpen: $taskToOpen
                     )
                         .frame(minWidth: 300, idealWidth: 360, maxWidth: 520)
                 }

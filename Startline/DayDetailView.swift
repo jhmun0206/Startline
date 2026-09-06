@@ -16,6 +16,10 @@ struct DayDetailView: View {
     @Binding var eventToOpen: DayEvent?
     /// 그리드에서 더블클릭한 날짜.
     @Binding var addOnDate: Date?
+    /// 그리드에서 드래그로 고른 기간.
+    @Binding var addRange: ClosedRange<Date>?
+    /// 그리드에서 클릭한 할 일.
+    @Binding var taskToOpen: ManagedTask?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(PersistenceReporter.self) private var saver
@@ -107,9 +111,25 @@ struct DayDetailView: View {
                 defaultDate: manager.selectedDate
             )
         }
-        // 그리드에서 날짜를 더블클릭한 경우. + 버튼과 같은 시트를 쓴다.
+        // 그리드에서 날짜를 더블클릭한 경우. 「일정 추가」 버튼과 같은 시트를 쓴다.
         .sheet(item: addDateBinding) { wrapped in
             AddSheetView(manager: manager, defaultDate: wrapped.date)
+        }
+        // 그리드에서 기간을 드래그한 경우. 시작일·종료일이 채워진 채 열린다.
+        .sheet(item: addRangeBinding) { wrapped in
+            AddSheetView(
+                manager: manager,
+                defaultDate: wrapped.range.lowerBound,
+                defaultEndDate: wrapped.range.upperBound
+            )
+        }
+        // 그리드에서 할 일을 클릭한 경우.
+        .sheet(item: $taskToOpen) { task in
+            TaskEditorView(
+                task: task,
+                defaultDueDate: task.dueAt ?? manager.selectedDate,
+                manager: manager
+            )
         }
         .alert("연결된 일정이 사라졌어요", isPresented: detachedAlertBinding) {
             Button("확인") { detachedNotices = [] }
@@ -122,6 +142,18 @@ struct DayDetailView: View {
     private struct AddDate: Identifiable {
         let date: Date
         var id: TimeInterval { date.timeIntervalSinceReferenceDate }
+    }
+
+    private struct AddRange: Identifiable {
+        let range: ClosedRange<Date>
+        var id: TimeInterval { range.lowerBound.timeIntervalSinceReferenceDate }
+    }
+
+    private var addRangeBinding: Binding<AddRange?> {
+        Binding(
+            get: { addRange.map(AddRange.init) },
+            set: { addRange = $0?.range }
+        )
     }
 
     private var addDateBinding: Binding<AddDate?> {

@@ -40,7 +40,7 @@ struct WeekdayHeader: Identifiable {
 ///
 /// 같은 일정이 여러 캘린더에 중복 등록된 경우(예: 공휴일, 생일)를 한 건으로 묶는다.
 /// 묶는 기준은 같은 날 안에서 `종일 여부 + 시작시각 + 제목` 이 모두 같은 것.
-struct DayEvent: Identifiable {
+nonisolated struct DayEvent: Identifiable {
     let id: String
     /// 묶인 원본 일정들. 최소 1건이며 캘린더명 순으로 정렬돼 있다.
     let events: [EKEvent]
@@ -79,6 +79,9 @@ final class CalendarManager {
 
     /// 화면에서 숨긴 캘린더. 앱을 껐다 켜도 유지된다.
     private(set) var hiddenCalendarIDs: Set<String> = []
+
+    /// 그리드에 할 일을 보여줄지. 기본값은 켜짐.
+    private(set) var showsTasks = true
 
     /// 그리드가 표시 중인 달. 항상 그 달 1일 00:00.
     private(set) var displayedMonth: Date
@@ -123,6 +126,7 @@ final class CalendarManager {
     private(set) var dataRevision = 0
 
     private static let hiddenCalendarsKey = "startline.hiddenCalendarIDs"
+    private static let showsTasksKey = "startline.showsTasks"
 
     /// 뷰에서도 같은 기준으로 날짜를 계산하도록 공개한다.
     let calendar: Calendar
@@ -139,6 +143,8 @@ final class CalendarManager {
         hiddenCalendarIDs = Set(
             UserDefaults.standard.stringArray(forKey: Self.hiddenCalendarsKey) ?? []
         )
+        // 저장된 적이 없으면 켜짐이 기본이다.
+        showsTasks = UserDefaults.standard.object(forKey: Self.showsTasksKey) as? Bool ?? true
 
         refreshAccessState()
         if accessState == .authorized {
@@ -305,6 +311,11 @@ final class CalendarManager {
     func hideAllCalendars() {
         hiddenCalendarIDs = Set(calendars.map(\.calendarIdentifier))
         persistHiddenCalendars()
+    }
+
+    func setShowsTasks(_ isVisible: Bool) {
+        showsTasks = isVisible
+        UserDefaults.standard.set(isVisible, forKey: Self.showsTasksKey)
     }
 
     private func persistHiddenCalendars() {

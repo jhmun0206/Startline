@@ -19,6 +19,8 @@ struct AddSheetView: View {
 
     let manager: CalendarManager
     let defaultDate: Date
+    /// 드래그로 고른 기간의 마지막 날.
+    var defaultEndDate: Date?
     var initialTab: Tab = .event
 
     @State private var tab: Tab = .event
@@ -42,7 +44,8 @@ struct AddSheetView: View {
                 EventEditorView(
                     manager: manager,
                     event: nil,
-                    defaultDate: defaultDate
+                    defaultDate: defaultDate,
+                    defaultEndDate: defaultEndDate
                 )
             case .task:
                 TaskEditorView(
