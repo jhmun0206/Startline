@@ -231,12 +231,6 @@ struct DayDetailView: View {
         }
     }
 
-    /// 일정과 딸린 할 일 영역이 맞닿도록 잡은 위아래 여백.
-    ///
-    /// **이 값이 곧 호버·클릭 영역의 높이다.** 줄이면 두 영역은 여전히 맞닿지만
-    /// 각 영역이 얇아진다. 너무 줄이면 겨냥하기 어려워진다.
-    private static let nestedRegionPadding: CGFloat = 5
-
     /// 일정 카드 하나.
     ///
     /// 딸린 할 일이 없으면 카드 전체가 하나의 클릭 대상이라 카드째 밝아진다.
@@ -259,7 +253,7 @@ struct DayDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HoverRegion(
                         onTap: { eventToOpen = dayEvent },
-                        verticalPadding: Self.nestedRegionPadding
+                        inset: CardMetrics.regionInset
                     ) {
                         EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                     }
@@ -268,7 +262,7 @@ struct DayDetailView: View {
                         ForEach(attached) { resolved in
                             HoverRegion(
                                 onTap: { editingTask = resolved.task },
-                                verticalPadding: Self.nestedRegionPadding
+                                inset: CardMetrics.regionInset
                             ) {
                                 TaskRow(
                                     resolved: resolved,
@@ -437,7 +431,6 @@ struct EventRow: View {
                 calendarLabel
             }
         }
-        .padding(.vertical, 2)
         .fixedSize(horizontal: false, vertical: true)
     }
 

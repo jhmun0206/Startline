@@ -13,6 +13,15 @@ import SwiftUI
 
 /// 우측 패널의 한 항목을 감싸는 카드.
 /// 텍스트만 나열하면 어디까지가 한 항목인지 알 수 없다.
+/// 우측 패널 카드의 안쪽 여백. 네 방향 모두 같은 값을 쓴다.
+/// 한쪽만 넓으면 카드가 비뚤어 보인다.
+enum CardMetrics {
+    /// 카드 경계에서 내용까지.
+    static let inset: CGFloat = 8
+    /// 카드 안에서 눌리는 단위 하나의 여백.
+    static let regionInset: CGFloat = 5
+}
+
 struct PanelCard<Content: View>: View {
     var tint: Color = .clear
     /// 눌러서 여는 카드인지. 마우스를 올리면 배경이 살짝 바뀌어 누를 수 있음을 알린다.
@@ -23,8 +32,7 @@ struct PanelCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(CardMetrics.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 10)
@@ -59,16 +67,16 @@ struct PanelCard<Content: View>: View {
 /// **밝아지는 범위와 눌리는 범위를 같게 한다.**
 struct HoverRegion<Content: View>: View {
     let onTap: () -> Void
-    /// 위아래 여백. 영역끼리 맞닿게 하려면 사이 간격을 이 값으로 흡수시킨다.
-    var verticalPadding: CGFloat = 3
+    /// 네 방향 여백. 영역끼리 맞닿게 하려면 사이 간격을 이 값으로 흡수시킨다.
+    /// **이 값이 곧 호버·클릭 영역의 크기다.**
+    var inset: CGFloat = CardMetrics.regionInset
     @ViewBuilder var content: Content
 
     @State private var isHovering = false
 
     var body: some View {
         content
-            .padding(.horizontal, 5)
-            .padding(.vertical, verticalPadding)
+            .padding(inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 6)
