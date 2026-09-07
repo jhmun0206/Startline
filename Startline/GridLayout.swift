@@ -120,10 +120,9 @@ nonisolated struct GridMetrics {
     var numberRowHeight: CGFloat = 23
     var titleFontSize: CGFloat = 11
     var dayNumberFontSize: CGFloat = 13
-    /// 일정이 있을 때 일정 몫으로 남겨 두는 최소 레인 수.
-    /// 할 일이 칸을 통째로 먹어 일정이 전부 `+N` 으로 밀리는 것을 막는다.
-    /// 막대 굵기가 같아진 뒤에도 이 보호는 유지한다 — 할 일 밴드가 위에 오기 때문이다.
-    var reservedEventLanes: Int = 2
+    /// 할 일이 있을 때 할 일 몫으로 남겨 두는 최소 레인 수.
+    /// 일정이 칸을 다 채워 할 일이 전부 `+N` 으로 밀리는 것을 막는다.
+    var reservedTaskLanes: Int = 2
 
     /// 칸 높이에 맞는 밀도를 고른다.
     ///
@@ -187,6 +186,14 @@ nonisolated struct WeekLayout {
     }
 
     /// 한 주치 배치를 계산한다.
+    ///
+    /// **일정은 위에서부터, 할 일은 아래에서부터 채운다.**
+    ///
+    /// 할 일 개수는 날마다 크게 변하고 일정은 상대적으로 안정적이다.
+    /// 변동이 큰 쪽을 위에 두면, 하루에 할 일이 몇 개 생겼다는 이유로
+    /// 그 주 전체의 일정이 아래로 밀린다. 그래서 변동이 큰 쪽을 아래로 보낸다.
+    ///
+    /// 「할 일을 먼저 보여준다」는 목적은 우측 패널 「오늘 시작」 블록이 맡는다.
     static func build(
         days: [Date],
         dayEvents: [Date: [DayEvent]],
@@ -204,7 +211,6 @@ nonisolated struct WeekLayout {
         let weekEndDay = calendar.startOfDay(for: weekEnd)
         let body = max(0, availableHeight - metrics.numberRowHeight - 3)
 
-        // ── 할 일 밴드 ──
         let taskItems = pendingTasks(
             tasks,
             days: days,
@@ -215,7 +221,6 @@ nonisolated struct WeekLayout {
         let taskLanes = assignLanes(taskItems)
         let taskStride = metrics.taskBarHeight + metrics.spacing
 
-        // ── 일정 밴드 ──
         var eventItems = pendingEvents(
             days: days,
             dayEvents: dayEvents,
@@ -233,42 +238,25 @@ nonisolated struct WeekLayout {
         let eventLanes = assignLanes(eventItems)
         let eventStride = metrics.eventBarHeight + metrics.spacing
 
-        // 일정이 있을 때만 그 몫을 남긴다. 할 일뿐이면 칸을 다 쓴다.
-        // 할 일 막대가 더 얇으므로 같은 높이에 더 많이 들어간다.
-        let eventLaneNeed = laneCount(eventLanes)
-        let reserved = eventLaneNeed > 0
-            ? CGFloat(min(eventLaneNeed, metrics.reservedEventLanes)) * eventStride
+        // 할 일이 있으면 그 몫을 남긴다. 할 일이 없으면 일정이 칸을 다 쓴다.
+        let taskLaneNeed = laneCount(taskLanes)
+        let reserved = taskLaneNeed > 0
+            ? CGFloat(min(taskLaneNeed, metrics.reservedTaskLanes)) * taskStride
             : 0
 
-        let taskCapacity = max(0, Int((body - reserved) / taskStride))
-        let usedTaskLanes = min(laneCount(taskLanes), taskCapacity)
-        let taskBandHeight = CGFloat(usedTaskLanes) * taskStride
-        let eventCapacity = max(0, Int((body - taskBandHeight) / eventStride))
+        let eventCapacity = max(0, Int((body - reserved) / eventStride))
+        let usedEventLanes = min(laneCount(eventLanes), eventCapacity)
+        let eventBandHeight = CGFloat(usedEventLanes) * eventStride
+        // 둘이 만나는 지점까지가 할 일 몫이다.
+        let taskCapacity = max(0, Int((body - eventBandHeight) / taskStride))
+
+        let bodyTop = metrics.numberRowHeight
+        let bodyBottom = metrics.numberRowHeight + body
 
         var segments: [GridSegment] = []
         var overflow: [Int: Int] = [:]
 
-        for (item, lane) in taskLanes {
-            if lane < taskCapacity {
-                segments.append(
-                    GridSegment(
-                        id: item.id,
-                        kind: item.kind,
-                        startColumn: item.startColumn,
-                        endColumn: item.endColumn,
-                        y: metrics.numberRowHeight + CGFloat(lane) * taskStride,
-                        height: metrics.taskBarHeight,
-                        continuesBefore: item.continuesBefore,
-                        continuesAfter: item.continuesAfter
-                    )
-                )
-            } else {
-                for column in item.startColumn...item.endColumn {
-                    overflow[column, default: 0] += 1
-                }
-            }
-        }
-
+        // 일정 — 위에서부터
         for (item, lane) in eventLanes {
             if lane < eventCapacity {
                 segments.append(
@@ -277,7 +265,7 @@ nonisolated struct WeekLayout {
                         kind: item.kind,
                         startColumn: item.startColumn,
                         endColumn: item.endColumn,
-                        y: metrics.numberRowHeight + taskBandHeight + CGFloat(lane) * eventStride,
+                        y: bodyTop + CGFloat(lane) * eventStride,
                         height: metrics.eventBarHeight,
                         continuesBefore: item.continuesBefore,
                         continuesAfter: item.continuesAfter
@@ -290,9 +278,30 @@ nonisolated struct WeekLayout {
             }
         }
 
-        let overflowY = metrics.numberRowHeight
-            + taskBandHeight
-            + CGFloat(min(laneCount(eventLanes), eventCapacity)) * eventStride
+        // 할 일 — 아래에서부터. 레인 0이 맨 아래 줄이다.
+        for (item, lane) in taskLanes {
+            if lane < taskCapacity {
+                segments.append(
+                    GridSegment(
+                        id: item.id,
+                        kind: item.kind,
+                        startColumn: item.startColumn,
+                        endColumn: item.endColumn,
+                        y: bodyBottom - CGFloat(lane + 1) * taskStride + metrics.spacing,
+                        height: metrics.taskBarHeight,
+                        continuesBefore: item.continuesBefore,
+                        continuesAfter: item.continuesAfter
+                    )
+                )
+            } else {
+                for column in item.startColumn...item.endColumn {
+                    overflow[column, default: 0] += 1
+                }
+            }
+        }
+
+        // 둘이 만나는 지점에 「+N」을 놓는다.
+        let overflowY = bodyTop + eventBandHeight
 
         return WeekLayout(
             segments: segments,

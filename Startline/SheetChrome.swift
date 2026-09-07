@@ -30,12 +30,28 @@ enum SheetMetrics {
 struct SheetHeader: View {
     let title: String
     var hasUnsavedInput = false
+    /// 같은 시트 안에서 다른 폼으로 들어왔을 때 되돌아갈 곳의 이름.
+    /// 값이 있으면 제목 앞에 「← 이름」 버튼이 붙는다.
+    var backTitle: String?
+    var onBack: (() -> Void)?
     let onClose: () -> Void
 
     @State private var isConfirmingClose = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let backTitle, let onBack {
+                Button(action: onBack) {
+                    Label(backTitle, systemImage: "chevron.left")
+                        .font(.subheadline)
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.link)
+                Text("·")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            }
+
             Text(title)
                 .font(.subheadline.bold())
                 .foregroundStyle(.secondary)

@@ -40,6 +40,9 @@ struct EventEditorView: View {
     @State private var errorMessage: String?
     @State private var isConfirmingDelete = false
 
+    /// 같은 시트 안에서 세부 편집으로 들어간 할 일. 값이 있으면 할 일 폼이 뜬다.
+    @State private var editingLinkedTask: ManagedTask?
+
     /// 일정을 저장할 때 함께 만들 할 일들. 폼 안에서 여러 개를 한 번에 적는다.
     @State private var draftTasks: [DraftTask] = []
 
@@ -108,7 +111,17 @@ struct EventEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isReadOnly {
+            if let task = editingLinkedTask {
+                // 같은 시트 자리에서 내용만 바꾼다. 일정 폼의 미저장 내용은
+                // @State 로 그대로 남아 있으므로 돌아오면 이어서 쓸 수 있다.
+                TaskEditorView(
+                    task: task,
+                    defaultDueDate: task.dueAt ?? defaultDate,
+                    manager: manager,
+                    backTitle: "일정으로",
+                    onFinish: returnFromLinkedTask
+                )
+            } else if isReadOnly {
                 readOnlyBody
             } else {
                 editableBody
@@ -322,10 +335,14 @@ struct EventEditorView: View {
                 .foregroundStyle(.secondary)
 
             ForEach($linkedEdits) { $edit in
-                AttachedTaskRow(edit: $edit) {
-                    // 지우기는 저장할 때 반영된다.
-                    linkedEdits.removeAll { $0.id == edit.id }
-                }
+                AttachedTaskRow(
+                    edit: $edit,
+                    onOpen: { editingLinkedTask = edit.task },
+                    onRemove: {
+                        // 지우기는 저장할 때 반영된다.
+                        linkedEdits.removeAll { $0.id == edit.id }
+                    }
+                )
             }
 
             ForEach($draftTasks) { $draft in
@@ -448,6 +465,16 @@ struct EventEditorView: View {
         guard !isEditing else { return }
         let range = resolvedRange()
         draft.set(start: range.start, end: max(range.end, range.start))
+    }
+
+    /// 할 일 세부 편집을 마치고 일정 폼으로 돌아온다.
+    ///
+    /// 할 일 쪽 변경은 그 폼에서 이미 저장됐으므로 목록을 다시 읽어 반영한다.
+    /// 지워졌으면 목록에서 사라진다.
+    private func returnFromLinkedTask() {
+        editingLinkedTask = nil
+        didLoadLinked = false
+        loadLinkedTasks()
     }
 
     /// 연결된 할 일을 편집 사본으로 옮긴다.
@@ -687,6 +714,8 @@ struct EventEditorView: View {
 /// 기준을 맞추기 위해서다. 그만두면 아무것도 남지 않는다. (BL-037)
 private struct AttachedTaskRow: View {
     @Binding var edit: EventEditorView.LinkedTaskEdit
+    /// 줄을 눌러 세부 편집으로 들어간다.
+    let onOpen: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
@@ -709,6 +738,15 @@ private struct AttachedTaskRow: View {
                 }
                 .fixedSize()
 
+                // 소요시간·부모 변경 등 나머지는 여기서 이어 고친다.
+                Button(action: onOpen) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("소요시간 등 자세히 고치기")
+
                 Button(action: onRemove) {
                     Image(systemName: "minus.circle")
                         .foregroundStyle(.secondary)
@@ -716,6 +754,9 @@ private struct AttachedTaskRow: View {
                 .buttonStyle(.borderless)
                 .help("이 할 일 지우기")
             }
+            // 글자 칸과 스테퍼는 자기 클릭을 가져가고, 나머지 빈 곳을 누르면 들어간다.
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
         }
     }
 }

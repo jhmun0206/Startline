@@ -29,6 +29,11 @@ struct TaskEditorView: View {
     /// 부모 일정 후보를 찾는 데 쓴다.
     let manager: CalendarManager
 
+    /// 다른 시트 안에 끼워 열렸을 때 돌아갈 곳의 이름. nil 이면 독립 시트다.
+    var backTitle: String?
+    /// 저장·삭제·되돌아가기로 이 폼을 마칠 때. 값이 있으면 시트를 닫지 않는다.
+    var onFinish: (() -> Void)?
+
     /// 「언제까지」를 정하는 두 방식. (명세서 5.3)
     private enum DueMode: Hashable {
         case specificDate
@@ -68,7 +73,9 @@ struct TaskEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(
                 title: isEditing ? "할 일 수정" : "할 일 추가",
-                hasUnsavedInput: hasUnsavedInput
+                hasUnsavedInput: hasUnsavedInput,
+                backTitle: backTitle,
+                onBack: onFinish
             ) { dismiss() }
 
             ScrollView {
@@ -433,7 +440,16 @@ struct TaskEditorView: View {
         guard let task else { return }
         modelContext.delete(task)
         saver.commit(modelContext)
-        dismiss()
+        finish()
+    }
+
+    /// 독립 시트면 닫고, 다른 폼 안에 끼워 열렸으면 그 폼으로 돌아간다.
+    private func finish() {
+        if let onFinish {
+            onFinish()
+        } else {
+            dismiss()
+        }
     }
 
     /// 저장하지 않은 입력이 있는지.
@@ -486,7 +502,7 @@ struct TaskEditorView: View {
 
         // 지연 저장에 맡기지 않는다. 여기서 디스크까지 내려가야 한다.
         saver.commit(modelContext)
-        dismiss()
+        finish()
     }
 
     /// 편집 시 부모 연결 상태를 반영한다.
