@@ -366,29 +366,55 @@ private struct EventBar: View {
     @State private var isShowingPreview = false
     @State private var hoverDelay: Task<Void, Never>?
 
+    /// 캘린더 색은 옅게 깔고, 글자는 검정으로 읽는다.
+    ///
+    /// 색을 꽉 채우면 일정이 많은 날이 색 덩어리로 보이고 흰 글씨는 잘 안 읽힌다.
+    /// Apple 캘린더처럼 배경은 옅게 두고 **좌측 세로 바에 원본 색**을 남겨 소속을 구분한다.
+    private static let timedBackgroundOpacity: Double = 0.16
+    /// 종일 일정은 좌측 바 없이 배경만으로 구분하므로 조금 더 진하게.
+    private static let allDayBackgroundOpacity: Double = 0.26
+    /// 인접 달 칸은 흐리게.
+    private static let dimFactor: Double = 0.45
+
+    private var isAllDay: Bool { dayEvent.primary.isAllDay }
+
     var body: some View {
         let color = dayEvent.primary.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray
+        let base = isAllDay ? Self.allDayBackgroundOpacity : Self.timedBackgroundOpacity
+        let backgroundOpacity = isDimmed ? base * Self.dimFactor : base
 
-        HStack(spacing: 2) {
-            if continuesBefore {
-                Image(systemName: "chevron.compact.left")
-                    .font(.system(size: 8, weight: .bold))
+        HStack(spacing: 0) {
+            // 시각 일정은 좌측에 원본 색 세로 바. 종일은 배경 전체로 구분한다.
+            if !isAllDay {
+                Rectangle()
+                    .fill(color.opacity(isDimmed ? Self.dimFactor : 1))
+                    .frame(width: 3)
             }
-            // 제목은 막대 시작 부분에 한 번만.
-            Text(title)
-                .font(.system(size: metrics.titleFontSize, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-            if continuesAfter {
-                Image(systemName: "chevron.compact.right")
-                    .font(.system(size: 8, weight: .bold))
+
+            HStack(spacing: 2) {
+                if continuesBefore {
+                    Image(systemName: "chevron.compact.left")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                // 제목은 막대 시작 부분에 한 번만.
+                Text(title)
+                    .font(.system(size: metrics.titleFontSize, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if continuesAfter {
+                    Image(systemName: "chevron.compact.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(.horizontal, 4)
         }
-        .foregroundStyle(color.readableForeground)
-        .padding(.horizontal, 4)
+        .foregroundStyle(isDimmed ? Color.primary.opacity(0.45) : .primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(
+        .background(color.opacity(backgroundOpacity))
+        .clipShape(
             // 이어지는 쪽은 각지게, 끝나는 쪽은 둥글게 해서 연결을 드러낸다.
             UnevenRoundedRectangle(
                 topLeadingRadius: continuesBefore ? 0 : 3,
@@ -396,7 +422,6 @@ private struct EventBar: View {
                 bottomTrailingRadius: continuesAfter ? 0 : 3,
                 topTrailingRadius: continuesAfter ? 0 : 3
             )
-            .fill(color.opacity(isDimmed ? 0.35 : 0.9))
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -824,14 +849,6 @@ extension Color {
         }
     }
 
-    /// 배경색 밝기에 따라 읽히는 전경색을 고른다.
-    var readableForeground: Color {
-        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return .white }
-        let luminance = 0.299 * srgb.redComponent
-            + 0.587 * srgb.greenComponent
-            + 0.114 * srgb.blueComponent
-        return luminance > 0.65 ? .black : .white
-    }
 }
 
 extension Array {
