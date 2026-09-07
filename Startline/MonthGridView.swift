@@ -13,6 +13,24 @@ import SwiftData
 import SwiftUI
 import UserNotifications
 
+/// 마우스를 올린 막대가 그리드 전체에 알리는 값.
+///
+/// 미리보기를 막대 안에서 그리면 아래쪽 주가 나중에 그려지며 덮는다.
+/// 그리드 맨 위에서 한 번만 그리기 위해 위치와 내용을 위로 올려보낸다.
+struct HoverPreviewValue {
+    let id: String
+    let anchor: Anchor<CGRect>
+    let kind: GridItemKind
+}
+
+struct HoverPreviewKey: PreferenceKey {
+    static let defaultValue: HoverPreviewValue? = nil
+
+    static func reduce(value: inout HoverPreviewValue?, nextValue: () -> HoverPreviewValue?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
 struct MonthGridView: View {
     let manager: CalendarManager
     let onOpenEvent: (DayEvent) -> Void
@@ -174,6 +192,51 @@ struct MonthGridView: View {
         .padding(.horizontal, GridInsets.horizontal)
         .padding(.bottom, GridInsets.bottom)
         .id(manager.dataRevision)
+        // 미리보기는 여기서 한 번만 그린다.
+        // **클릭을 통과시킨다.** 팝오버로 띄우면 macOS 가 별도 창을 만들어
+        // 바깥 클릭을 닫기용으로 삼키므로, 막대를 누르려면 두 번 눌러야 했다. (BL-023)
+        .overlayPreferenceValue(HoverPreviewKey.self) { preview in
+            GeometryReader { proxy in
+                if let preview {
+                    hoverPreviewCard(preview, in: proxy)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// 마우스를 올린 막대 옆에 미리보기를 놓는다. 창 밖으로 나가지 않게 가둔다.
+    @ViewBuilder
+    private func hoverPreviewCard(
+        _ preview: HoverPreviewValue,
+        in proxy: GeometryProxy
+    ) -> some View {
+        let rect = proxy[preview.anchor]
+        let width: CGFloat = 300
+        let estimatedHeight: CGFloat = 160
+
+        Group {
+            switch preview.kind {
+            case .event(let dayEvent):
+                EventPreviewCard(dayEvent: dayEvent)
+            case .task(let item):
+                TaskPreviewCard(resolved: item.resolved, isEcho: item.isEcho)
+            case .draft:
+                EmptyView()
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .offset(
+            x: min(max(rect.maxX + 8, 0), max(0, proxy.size.width - width)),
+            y: min(max(rect.minY - 6, 0), max(0, proxy.size.height - estimatedHeight))
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// 그리드 본문 크기를 읽어 둔다. 창 크기가 바뀌면 따라 갱신된다.
@@ -563,8 +626,11 @@ private struct EventBar: View {
                 cancelHover()
             }
         }
-        .popover(isPresented: $isShowingPreview, arrowEdge: .trailing) {
-            EventPreviewCard(dayEvent: dayEvent)
+        // 미리보기는 그리드 맨 위에서 그린다. 여기서는 자리와 내용만 알린다.
+        .anchorPreference(key: HoverPreviewKey.self, value: .bounds) { anchor in
+            isShowingPreview
+                ? HoverPreviewValue(id: dayEvent.id, anchor: anchor, kind: .event(dayEvent))
+                : nil
         }
     }
 
@@ -684,8 +750,10 @@ private struct TaskBar: View {
                 cancelHover()
             }
         }
-        .popover(isPresented: $isShowingPreview, arrowEdge: .trailing) {
-            TaskPreviewCard(resolved: resolved, isEcho: item.isEcho)
+        .anchorPreference(key: HoverPreviewKey.self, value: .bounds) { anchor in
+            isShowingPreview
+                ? HoverPreviewValue(id: item.key, anchor: anchor, kind: .task(item))
+                : nil
         }
     }
 
