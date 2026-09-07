@@ -23,6 +23,8 @@ struct AddSheetView: View {
     var defaultEndDate: Date?
     var initialTab: Tab = .event
 
+    @Environment(DraftEventPreview.self) private var draft
+
     @State private var tab: Tab = .event
 
     var body: some View {
@@ -53,6 +55,8 @@ struct AddSheetView: View {
                     defaultDueDate: defaultDate,
                     manager: manager
                 )
+                // 할 일 탭에서는 일정 임시 막대를 거둔다.
+                .onAppear { draft.clear() }
             }
         }
         .frame(width: SheetMetrics.width)

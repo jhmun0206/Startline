@@ -95,10 +95,18 @@ nonisolated struct GridTaskItem {
     var key: String { "\(resolved.id.uuidString)|\(isEcho ? "echo" : "main")" }
 }
 
+/// 아직 저장되지 않은 일정이 차지할 자리.
+nonisolated struct DraftRangeItem {
+    let startDay: Date
+    let endDay: Date
+}
+
 /// 그리드 막대 하나가 나타내는 것.
 nonisolated enum GridItemKind {
     case event(DayEvent)
     case task(GridTaskItem)
+    /// 드래그 중이거나 시트가 떠 있는 동안 보여주는 임시 일정.
+    case draft(DraftRangeItem)
 }
 
 /// 막대 굵기·간격·글자 크기.
@@ -169,6 +177,7 @@ nonisolated struct WeekLayout {
         days: [Date],
         dayEvents: [Date: [DayEvent]],
         tasks: [GridTaskItem],
+        draft: DraftRangeItem? = nil,
         availableHeight: CGFloat,
         metrics: GridMetrics = GridMetrics(),
         calendar: Calendar
@@ -193,13 +202,20 @@ nonisolated struct WeekLayout {
         let taskStride = metrics.taskBarHeight + metrics.spacing
 
         // ── 일정 밴드 ──
-        let eventItems = pendingEvents(
+        var eventItems = pendingEvents(
             days: days,
             dayEvents: dayEvents,
             weekStart: weekStartDay,
             weekEnd: weekEndDay,
             calendar: calendar
         )
+        // 임시 막대도 실제 일정과 같은 레인 규칙을 따른다. 자리가 자연스러워야
+        // 저장했을 때 막대가 튀지 않는다.
+        if let draft, let item = pendingDraft(
+            draft, days: days, weekStart: weekStartDay, weekEnd: weekEndDay, calendar: calendar
+        ) {
+            eventItems.append(item)
+        }
         let eventLanes = assignLanes(eventItems)
         let eventStride = metrics.eventBarHeight + metrics.spacing
 
@@ -345,6 +361,33 @@ nonisolated struct WeekLayout {
                 sortKey: item.resolved.task.title
             )
         }
+    }
+
+    private static func pendingDraft(
+        _ draft: DraftRangeItem,
+        days: [Date],
+        weekStart: Date,
+        weekEnd: Date,
+        calendar: Calendar
+    ) -> PendingItem? {
+        let start = calendar.startOfDay(for: draft.startDay)
+        let end = calendar.startOfDay(for: max(draft.endDay, draft.startDay))
+        guard start <= weekEnd, end >= weekStart else { return nil }
+
+        guard let startColumn = column(of: max(start, weekStart), days: days, calendar: calendar),
+              let endColumn = column(of: min(end, weekEnd), days: days, calendar: calendar)
+        else { return nil }
+
+        return PendingItem(
+            id: "draft",
+            kind: .draft(draft),
+            startColumn: startColumn,
+            endColumn: endColumn,
+            continuesBefore: start < weekStart,
+            continuesAfter: end > weekEnd,
+            // 같은 길이면 먼저 자리를 잡아 위쪽 레인에 놓이게 한다.
+            sortKey: ""
+        )
     }
 
     private static func pendingEvents(

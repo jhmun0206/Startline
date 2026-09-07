@@ -17,6 +17,7 @@ struct EventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(PersistenceReporter.self) private var saver
+    @Environment(DraftEventPreview.self) private var draft
 
     let manager: CalendarManager
     /// 고칠 일정. nil 이면 새로 만든다.
@@ -116,6 +117,13 @@ struct EventEditorView: View {
         .frame(width: SheetMetrics.width)
         .onAppear(perform: load)
         .onAppear(perform: loadLinkedTasks)
+        // 시트에 적힌 날짜를 캘린더에서 눈으로 확인할 수 있어야 한다.
+        // 새 일정을 만드는 동안 그리드에 임시 막대를 띄우고, 날짜를 바꾸면 따라 움직인다.
+        .onAppear(perform: syncDraft)
+        .onChange(of: startDay) { _, _ in syncDraft() }
+        .onChange(of: endDay) { _, _ in syncDraft() }
+        .onChange(of: isAllDay) { _, _ in syncDraft() }
+        .onDisappear { draft.clear() }
     }
 
     // MARK: - 읽기 전용
@@ -431,6 +439,15 @@ struct EventEditorView: View {
         return allTasks
             .filter { $0.parentEventID == identifier }
             .sorted { ($0.dueAt ?? .distantFuture) < ($1.dueAt ?? .distantFuture) }
+    }
+
+    /// 그리드의 임시 막대를 지금 입력값에 맞춘다.
+    ///
+    /// 기존 일정을 고칠 때는 실제 막대가 이미 있으므로 띄우지 않는다.
+    private func syncDraft() {
+        guard !isEditing else { return }
+        let range = resolvedRange()
+        draft.set(start: range.start, end: max(range.end, range.start))
     }
 
     /// 연결된 할 일을 편집 사본으로 옮긴다.

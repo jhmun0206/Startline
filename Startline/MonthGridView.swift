@@ -23,9 +23,15 @@ struct MonthGridView: View {
     let scheduler: NotificationScheduler
 
     @Query private var allTasks: [ManagedTask]
+    @Environment(DraftEventPreview.self) private var draft
 
     /// 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
+    /// 임시 막대에 쓸 색. 새 일정이 들어갈 기본 캘린더 색을 따른다.
+    private var draftColor: Color {
+        manager.defaultWritableCalendar.map { Color(cgColor: $0.cgColor) } ?? .accentColor
+    }
+
     /// 여백을 뺀 그리드 본문 좌표계 이름.
     private static let gridSpace = "startline.grid"
 
@@ -61,6 +67,10 @@ struct MonthGridView: View {
         let dayEvents = manager.dayEvents(forMonth: month)
         let tasks = manager.showsTasks ? taskItems(in: days) : []
 
+        let draftItem = draft.range.map {
+            DraftRangeItem(startDay: $0.lowerBound, endDay: $0.upperBound)
+        }
+
         return VStack(spacing: 0) {
             ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
                 WeekRow(
@@ -68,8 +78,10 @@ struct MonthGridView: View {
                     days: week,
                     dayEvents: dayEvents,
                     tasks: tasks,
+                    draft: draftItem,
                     now: now,
-                    selectionRange: dragRange,
+                    draftRange: draft.range,
+                    draftColor: draftColor,
                     onSelect: { day in
                         manager.selectedDate = calendar.startOfDay(for: day)
                     },
@@ -145,6 +157,7 @@ struct MonthGridView: View {
                 }
                 dragAnchor = anchor
                 dragCurrent = current
+                draft.set(start: min(anchor, current), end: max(anchor, current), isDragging: true)
             }
             .onEnded { _ in
                 let range = dragRange
@@ -154,8 +167,12 @@ struct MonthGridView: View {
                 }
                 guard let range, range.lowerBound != range.upperBound else {
                     NSLog("[Startline·drag] 끝 — 범위가 없거나 하루뿐이라 시트를 열지 않음")
+                    // 시트가 안 열리므로 임시 막대도 거둔다.
+                    draft.clear()
                     return
                 }
+                // 여기서 지우지 않는다. 곧 열릴 시트가 같은 범위를 이어받아
+                // 막대가 끊기지 않고 그대로 남는다.
                 NSLog("[Startline·drag] 끝 — %@ ~ %@ 로 시트 염",
                       Self.logFormatter.string(from: range.lowerBound),
                       Self.logFormatter.string(from: range.upperBound))
@@ -228,8 +245,10 @@ private struct WeekRow: View {
     let days: [Date]
     let dayEvents: [Date: [DayEvent]]
     let tasks: [GridTaskItem]
+    let draft: DraftRangeItem?
     let now: Date
-    let selectionRange: ClosedRange<Date>?
+    let draftRange: ClosedRange<Date>?
+    let draftColor: Color
     let onSelect: (Date) -> Void
     let onAdd: (Date) -> Void
     let onOpenEvent: (DayEvent) -> Void
@@ -246,6 +265,7 @@ private struct WeekRow: View {
                 days: days,
                 dayEvents: dayEvents,
                 tasks: tasks,
+                draft: draft,
                 availableHeight: proxy.size.height,
                 metrics: metrics,
                 calendar: calendar
@@ -294,7 +314,7 @@ private struct WeekRow: View {
                     isInMonth: manager.isInDisplayedMonth(day),
                     isToday: calendar.isDateInToday(day),
                     isSelected: calendar.isDate(day, inSameDayAs: manager.selectedDate),
-                    isInDragRange: selectionRange?.contains(calendar.startOfDay(for: day)) ?? false,
+                    isInDraftRange: draftRange?.contains(calendar.startOfDay(for: day)) ?? false,
                     onSelect: { onSelect(day) },
                     onAdd: { onAdd(day) }
                 )
@@ -323,6 +343,13 @@ private struct WeekRow: View {
                 continuesAfter: segment.continuesAfter,
                 onOpen: { onOpenTask(item.resolved) }
             )
+        case .draft:
+            DraftBar(
+                metrics: metrics,
+                color: draftColor,
+                continuesBefore: segment.continuesBefore,
+                continuesAfter: segment.continuesAfter
+            )
         }
     }
 
@@ -337,7 +364,7 @@ private struct DayCellBackground: View {
     let isInMonth: Bool
     let isToday: Bool
     let isSelected: Bool
-    let isInDragRange: Bool
+    let isInDraftRange: Bool
     let onSelect: () -> Void
     let onAdd: () -> Void
 
@@ -378,7 +405,8 @@ private struct DayCellBackground: View {
     }
 
     private var background: Color {
-        if isInDragRange { return Color.accentColor.opacity(0.22) }
+        // 범위 표시는 임시 막대가 맡는다. 칸은 영역만 알 수 있을 만큼만 물들인다.
+        if isInDraftRange { return Color.accentColor.opacity(0.06) }
         if isSelected { return Color.accentColor.opacity(0.12) }
         return .clear
     }
@@ -982,5 +1010,52 @@ struct TaskPreviewCard: View {
         }
         .padding(14)
         .frame(minWidth: 200, maxWidth: 320, alignment: .leading)
+    }
+}
+
+/// 아직 저장되지 않은 일정의 임시 막대.
+///
+/// 실제 일정 막대와 같은 높이·모양·레인에 놓인다. 저장했을 때 막대가 튀지 않아야
+/// "지금 만드는 것이 여기에 들어간다"는 것이 그대로 전달된다.
+/// 실제 일정과 헷갈리지 않도록 테두리를 점선으로 둔다.
+private struct DraftBar: View {
+    let metrics: GridMetrics
+    let color: Color
+    let continuesBefore: Bool
+    let continuesAfter: Bool
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: continuesBefore ? 0 : 3,
+            bottomLeadingRadius: continuesBefore ? 0 : 3,
+            bottomTrailingRadius: continuesAfter ? 0 : 3,
+            topTrailingRadius: continuesAfter ? 0 : 3
+        )
+
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(color)
+                .frame(width: 3)
+
+            Text("새로운 일정")
+                .font(.system(size: metrics.titleFontSize, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 4)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(color.opacity(0.18))
+        .overlay(
+            shape.strokeBorder(
+                color.opacity(0.75),
+                style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+            )
+        )
+        .clipShape(shape)
+        // 임시 막대는 클릭 대상이 아니다. 아래 칸이 계속 눌려야 한다.
+        .allowsHitTesting(false)
     }
 }
