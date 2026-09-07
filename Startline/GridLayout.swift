@@ -14,6 +14,74 @@
 import EventKit
 import Foundation
 
+/// 그리드 바깥 여백. **여러 곳이 같은 값을 써야 열이 맞으므로 한곳에 둔다.**
+///
+/// 요일 머리글과 날짜 그리드가 다른 값을 쓰면 열이 어긋난다.
+/// 좌표를 날짜로 바꿀 때도 이 값을 손으로 빼면 여백을 바꾸는 순간 조용히 틀어진다.
+/// 그래서 좌표 변환은 여백을 뺀 **본문 좌표계**에서 한다. (`GridHitTest`)
+nonisolated enum GridInsets {
+    static let horizontal: CGFloat = 20
+    static let bottom: CGFloat = 20
+    /// 막대 좌우 안쪽 여백.
+    static let barInset: CGFloat = 2
+}
+
+/// 그리드 본문 좌표를 행·열로 바꾼다.
+///
+/// 순수 함수라 창 크기·주 수·해상도를 바꿔 가며 검증할 수 있다.
+/// **좌표는 여백을 뺀 본문 기준이다.** 뷰에서는 named 좌표계로 그 기준을 만든다.
+nonisolated enum GridHitTest {
+
+    static let columnCount = 7
+
+    /// - Parameters:
+    ///   - point: 그리드 본문 좌표.
+    ///   - size: 그리드 본문 크기.
+    ///   - weekCount: 이 달의 주 수 (4~6).
+    ///   - clamped: 범위를 벗어난 좌표를 가장 가까운 칸으로 당길지.
+    ///     드래그를 시작할 때는 `false`(그리드 밖에서 시작하면 무시),
+    ///     끄는 도중에는 `true`(가장자리를 넘어가도 계속 따라오게).
+    static func cell(
+        at point: CGPoint,
+        in size: CGSize,
+        weekCount: Int,
+        clamped: Bool = false
+    ) -> (row: Int, column: Int)? {
+        guard weekCount > 0, size.width > 0, size.height > 0 else { return nil }
+
+        let inside = point.x >= 0 && point.y >= 0
+            && point.x < size.width && point.y < size.height
+        guard inside || clamped else { return nil }
+
+        let x = min(max(point.x, 0), size.width - 0.001)
+        let y = min(max(point.y, 0), size.height - 0.001)
+
+        let columnWidth = size.width / CGFloat(columnCount)
+        let rowHeight = size.height / CGFloat(weekCount)
+
+        let column = min(max(Int(x / columnWidth), 0), columnCount - 1)
+        let row = min(max(Int(y / rowHeight), 0), weekCount - 1)
+        return (row, column)
+    }
+
+    /// 좌표가 가리키는 날짜. `days` 는 그리드에 놓인 날짜 전체(주 × 7).
+    static func date(
+        at point: CGPoint,
+        in size: CGSize,
+        days: [Date],
+        clamped: Bool = false
+    ) -> Date? {
+        let weekCount = days.count / columnCount
+        guard weekCount > 0, days.count % columnCount == 0 else { return nil }
+        guard let cell = cell(at: point, in: size, weekCount: weekCount, clamped: clamped)
+        else { return nil }
+
+        let index = cell.row * columnCount + cell.column
+        guard days.indices.contains(index) else { return nil }
+        return days[index]
+    }
+}
+
 /// 그리드에 놓이는 할 일 하나. 시작일부터 마감일까지 뻗는다.
 nonisolated struct GridTaskItem {
     let resolved: ResolvedTask

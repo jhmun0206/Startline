@@ -216,10 +216,11 @@ struct TaskEditorView: View {
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     Stepper(value: $daysBeforeParent, in: 0...365) {
-                        Text(daysBeforeParent == 0 ? "당일" : "\(daysBeforeParent)일 전")
+                        // 「전」이 아니라 「전까지」— 그 값이 마감이라는 것을 드러낸다.
+                        Text(daysBeforeParent == 0 ? "당일까지" : "\(daysBeforeParent)일 전까지")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
+                            .frame(width: 62, alignment: .trailing)
                     }
                     .fixedSize()
                 }

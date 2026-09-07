@@ -55,7 +55,7 @@ struct AddSheetView: View {
                 )
             }
         }
-        .frame(width: 440)
+        .frame(width: SheetMetrics.width)
         .onAppear { tab = initialTab }
     }
 }

@@ -26,6 +26,9 @@ struct MonthGridView: View {
 
     /// 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
+    /// 여백을 뺀 그리드 본문 좌표계 이름.
+    private static let gridSpace = "startline.grid"
+
     /// 드래그로 기간을 고르는 중.
     @State private var dragAnchor: Date?
     @State private var dragCurrent: Date?
@@ -81,11 +84,32 @@ struct MonthGridView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 20)
+        // 본문 크기를 실제로 채운다. 이게 없으면 좌표를 날짜로 바꿀 수 없다.
+        .background(gridSizeReader)
+        // 여백을 뺀 본문 기준 좌표계. 제스처가 이 기준으로 좌표를 준다.
+        .coordinateSpace(name: Self.gridSpace)
         .contentShape(Rectangle())
-        .gesture(rangeDrag(weeks: weeks))
+        .gesture(rangeDrag(days: days))
+        .padding(.horizontal, GridInsets.horizontal)
+        .padding(.bottom, GridInsets.bottom)
         .id(manager.dataRevision)
+    }
+
+    /// 그리드 본문 크기를 읽어 둔다. 창 크기가 바뀌면 따라 갱신된다.
+    private var gridSizeReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear {
+                    gridSize = proxy.size
+                    NSLog("[Startline·drag] gridSize 최초 측정 %.0fx%.0f",
+                          proxy.size.width, proxy.size.height)
+                }
+                .onChange(of: proxy.size) { _, newValue in
+                    gridSize = newValue
+                    NSLog("[Startline·drag] gridSize 갱신 %.0fx%.0f (창 크기 변경)",
+                          newValue.width, newValue.height)
+                }
+        }
     }
 
     // MARK: - 드래그로 기간 고르기
@@ -97,43 +121,56 @@ struct MonthGridView: View {
         return lower...upper
     }
 
-    private func rangeDrag(weeks: [[Date]]) -> some Gesture {
+    private func rangeDrag(days: [Date]) -> some Gesture {
         // 최소 이동 거리를 두어 한 번 클릭·더블클릭과 부딪히지 않게 한다.
-        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+        DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.gridSpace))
             .onChanged { value in
-                guard let anchor = date(at: value.startLocation, weeks: weeks) else { return }
+                // 시작점은 그리드 안이어야 한다. 끄는 도중에는 밖으로 나가도 따라온다.
+                guard let anchor = GridHitTest.date(
+                    at: value.startLocation, in: gridSize, days: days
+                ) else {
+                    NSLog("[Startline·drag] 시작 좌표 (%.0f, %.0f) 가 본문 %.0fx%.0f 밖 → 무시",
+                          value.startLocation.x, value.startLocation.y,
+                          gridSize.width, gridSize.height)
+                    return
+                }
+
+                let current = GridHitTest.date(
+                    at: value.location, in: gridSize, days: days, clamped: true
+                ) ?? anchor
+
+                if dragAnchor == nil {
+                    NSLog("[Startline·drag] 시작 — 본문 %.0fx%.0f, %d주",
+                          gridSize.width, gridSize.height, days.count / 7)
+                }
                 dragAnchor = anchor
-                dragCurrent = date(at: value.location, weeks: weeks) ?? anchor
+                dragCurrent = current
             }
             .onEnded { _ in
+                let range = dragRange
                 defer {
                     dragAnchor = nil
                     dragCurrent = nil
                 }
-                guard let range = dragRange, range.lowerBound != range.upperBound else { return }
+                guard let range, range.lowerBound != range.upperBound else {
+                    NSLog("[Startline·drag] 끝 — 범위가 없거나 하루뿐이라 시트를 열지 않음")
+                    return
+                }
+                NSLog("[Startline·drag] 끝 — %@ ~ %@ 로 시트 염",
+                      Self.logFormatter.string(from: range.lowerBound),
+                      Self.logFormatter.string(from: range.upperBound))
                 manager.selectedDate = range.lowerBound
                 onAddRange(range.lowerBound, range.upperBound)
             }
     }
 
-    /// 그리드 안 좌표가 어느 날짜인지. 여백을 뺀 뒤 행·열로 나눈다.
-    private func date(at point: CGPoint, weeks: [[Date]]) -> Date? {
-        guard !weeks.isEmpty, gridSize.width > 0, gridSize.height > 0 else { return nil }
+    private static let logFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
-        let x = point.x - 20
-        let y = point.y
-        guard x >= 0, x < gridSize.width, y >= 0 else { return nil }
-
-        let rowHeight = gridSize.height / CGFloat(weeks.count)
-        let columnWidth = gridSize.width / 7
-
-        let row = min(max(Int(y / rowHeight), 0), weeks.count - 1)
-        let column = min(max(Int(x / columnWidth), 0), 6)
-
-        guard weeks[row].indices.contains(column) else { return nil }
-        return calendar.startOfDay(for: weeks[row][column])
-    }
-
+    /// 그리드 본문 크기. `gridSizeReader` 가 채우고 창 크기 변화를 따라간다.
     @State private var gridSize: CGSize = .zero
 
     // MARK: - 할 일 배치
@@ -221,11 +258,12 @@ private struct WeekRow: View {
                 ForEach(layout.segments) { segment in
                     segmentView(segment, metrics: metrics)
                         .frame(
-                            width: max(0, columnWidth * CGFloat(segment.columnSpan) - 4),
+                            width: max(0, columnWidth * CGFloat(segment.columnSpan)
+                                       - GridInsets.barInset * 2),
                             height: segment.height
                         )
                         .offset(
-                            x: columnWidth * CGFloat(segment.startColumn) + 2,
+                            x: columnWidth * CGFloat(segment.startColumn) + GridInsets.barInset,
                             y: segment.y
                         )
                 }
@@ -235,9 +273,9 @@ private struct WeekRow: View {
                         Text("+\(count)")
                             .font(.system(size: metrics.titleFontSize, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .frame(width: max(0, columnWidth - 8), alignment: .leading)
+                            .frame(width: max(0, columnWidth - GridInsets.barInset * 4), alignment: .leading)
                             .offset(
-                                x: columnWidth * CGFloat(column) + 4,
+                                x: columnWidth * CGFloat(column) + GridInsets.barInset * 2,
                                 y: layout.overflowY
                             )
                     }
@@ -637,9 +675,11 @@ private struct MonthHeaderView: View {
     var body: some View {
         HStack(spacing: 0) {
             // 10·11·12월처럼 글자가 늘어나도 버튼이 밀리지 않도록 폭을 고정한다.
+            // `.title2` 기준으로 "2026년 12월" 이 들어가는 폭이다.
+            // 글꼴 크기를 바꾸면 이 값도 함께 봐야 한다.
             Text(monthTitle)
                 .font(.title2.bold())
-                .frame(width: 138, alignment: .leading)
+                .frame(width: Self.titleWidth, alignment: .leading)
 
             HStack(spacing: 2) {
                 Button { manager.goToPreviousMonth() } label: { Image(systemName: "chevron.left") }
@@ -704,9 +744,12 @@ private struct MonthHeaderView: View {
             .help("다시 불러오기")
             .padding(.leading, 10)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, GridInsets.horizontal)
         .padding(.vertical, 12)
     }
+
+    /// 가장 긴 월 이름이 들어가는 폭.
+    private static let titleWidth: CGFloat = 138
 
     private var hasFilters: Bool {
         !manager.hiddenCalendarIDs.isEmpty || !manager.showsTasks || !manager.showsTaskSpan
@@ -833,7 +876,8 @@ private struct WeekdayHeaderView: View {
             }
         }
         .padding(.vertical, 6)
-        .padding(.horizontal, 20)
+        // 그리드와 같은 값이어야 열이 맞는다.
+        .padding(.horizontal, GridInsets.horizontal)
     }
 }
 
