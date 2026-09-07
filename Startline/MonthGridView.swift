@@ -672,6 +672,8 @@ struct EventPreviewCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            PreviewKindLabel(kind: .event)
+
             Text(event.title ?? "(제목 없음)")
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
@@ -697,6 +699,9 @@ struct EventPreviewCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Divider()
+            PreviewActionHint(text: "눌러서 일정 고치기")
         }
         .padding(14)
         .frame(minWidth: 200, maxWidth: 300, alignment: .leading)
@@ -967,6 +972,8 @@ struct TaskPreviewCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            PreviewKindLabel(kind: .task)
+
             // 그리드에서 잘려 보이던 제목을 온전히 보여준다.
             Text(task.title)
                 .font(.headline)
@@ -1032,9 +1039,66 @@ struct TaskPreviewCard: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            Divider()
+            PreviewActionHint(text: "눌러서 할 일 고치기")
         }
         .padding(14)
         .frame(minWidth: 200, maxWidth: 320, alignment: .leading)
+    }
+}
+
+/// 미리보기가 일정인지 할 일인지 밝힌다.
+///
+/// 그리드에서 일정과 딸린 할 일이 나란히 놓이면 팝오버만 봐서는 어느 쪽인지 알기 어렵다.
+/// 누르면 서로 다른 시트가 열리므로 미리 구분되어야 한다.
+private struct PreviewKindLabel: View {
+    enum Kind {
+        case event
+        case task
+
+        var title: String {
+            switch self {
+            case .event: return "일정"
+            case .task: return "할 일"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .event: return "calendar"
+            case .task: return "checkmark.circle"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .event: return .accentColor
+            case .task: return .orange
+            }
+        }
+    }
+
+    let kind: Kind
+
+    var body: some View {
+        Label(kind.title, systemImage: kind.symbol)
+            .font(.caption2.bold())
+            .foregroundStyle(kind.tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(kind.tint.opacity(0.14), in: Capsule())
+    }
+}
+
+/// 누르면 무엇이 열리는지 알린다.
+private struct PreviewActionHint: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "hand.tap")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 }
 

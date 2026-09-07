@@ -164,6 +164,9 @@ struct TaskRow: View {
 
     let resolved: ResolvedTask
     /// 일정 아래에 딸린 할 일이면 들여쓴다.
+    ///
+    /// **들여쓰기 말고는 아무것도 다르지 않다.** 같은 데이터가 위치에 따라 다르게 보이면
+    /// 사용자는 둘을 다른 것으로 인식한다. 계층은 들여쓰기와 구분선으로만 나타낸다.
     var isNested = false
     /// 「할 일」 섹션에서는 부모 일정명을 함께 보여준다.
     /// 부모 카드 아래에서는 이미 맥락이 있으므로 붙이지 않는다.
@@ -190,7 +193,7 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(showsParentContext ? resolved.contextualTitle : task.title)
-                        .font(isNested ? .callout : .body)
+                        .font(.body)
                         .strikethrough(task.status == .done)
                         .foregroundStyle(task.status == .done ? .secondary : .primary)
                         .lineLimit(2)

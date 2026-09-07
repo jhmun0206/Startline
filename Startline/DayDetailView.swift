@@ -63,8 +63,23 @@ struct DayDetailView: View {
     ///
     /// 부모 일정 카드 아래에도 나오는 것은 의도된 동작이다 — 일정 관점과 할 일 관점 둘 다 필요하다.
     /// 다만 같은 날 화면에 두 번 나오지는 않게 한다.
+    /// 부모 일정 카드 안에 들어가는 할 일.
+    ///
+    /// 부모가 이 날에 있으면 그 카드 안에만 놓는다. 「할 일」 섹션에는 겹쳐 넣지 않는다.
+    private var nestedTasks: [ResolvedTask] {
+        var seen = Set<UUID>()
+        return events
+            .flatMap { attachedTasks(for: $0) }
+            .filter { seen.insert($0.id).inserted }
+    }
+
+    /// 이 날 화면에 보이는 할 일 전체. 상단 요약 개수가 이 값을 따른다.
+    private var visibleTaskCount: Int {
+        nestedTasks.count + sectionTasks.count
+    }
+
     private var sectionTasks: [ResolvedTask] {
-        let nestedIDs = Set(events.flatMap { attachedTasks(for: $0) }.map(\.id))
+        let nestedIDs = Set(nestedTasks.map(\.id))
 
         return resolvedTasks
             .filter { !nestedIDs.contains($0.id) }
@@ -296,7 +311,7 @@ struct DayDetailView: View {
                 .help("일정이나 할 일 추가")
             }
 
-            Text("일정 \(events.count)개 · 할 일 \(sectionTasks.count)개")
+            Text("일정 \(events.count)개 · 할 일 \(visibleTaskCount)개")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
