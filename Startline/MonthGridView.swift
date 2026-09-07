@@ -24,6 +24,7 @@ struct MonthGridView: View {
 
     @Query private var allTasks: [ManagedTask]
     @Environment(DraftEventPreview.self) private var draft
+    @Environment(GridSelection.self) private var selection
 
     /// 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
@@ -56,6 +57,27 @@ struct MonthGridView: View {
 
         let yInRow = point.y - rowHeight * CGFloat(cell.row)
         return layout.segment(atColumn: cell.column, y: yInRow) != nil
+    }
+
+    /// 부모-자식 관계를 계산할 때 쓰는 목록. 화면에 보이는 달 전체가 대상이다.
+    private var resolvedTasks: [ResolvedTask] {
+        TaskResolver(manager: manager, now: now).resolve(allTasks)
+    }
+
+    /// 고른 것을 연다. Enter 로 부른다.
+    private func openSelected(dayEvents: [Date: [DayEvent]], tasks: [GridTaskItem]) {
+        switch selection.current {
+        case .event(let id):
+            let match = dayEvents.values.flatMap { $0 }
+                .first { $0.events.contains { $0.eventIdentifier == id } }
+            if let match { onOpenEvent(match) }
+        case .task(let id):
+            if let match = tasks.first(where: { $0.resolved.id == id }) {
+                onOpenTask(match.resolved)
+            }
+        case nil:
+            break
+        }
     }
 
     /// 임시 막대에 쓸 색. 새 일정이 들어갈 기본 캘린더 색을 따른다.
@@ -115,6 +137,8 @@ struct MonthGridView: View {
                     now: now,
                     draftRange: draft.range,
                     draftColor: draftColor,
+                    selection: selection,
+                    resolvedTasks: resolvedTasks,
                     onSelect: { day in
                         manager.selectedDate = calendar.startOfDay(for: day)
                     },
@@ -135,6 +159,18 @@ struct MonthGridView: View {
         .coordinateSpace(name: Self.gridSpace)
         .contentShape(Rectangle())
         .gesture(rangeDrag(days: days, dayEvents: dayEvents, tasks: tasks))
+        // 고른 것을 Esc 로 풀고, Enter 로 연다. 두 번 클릭이 번거로울 때의 지름길.
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.escape) {
+            guard !selection.isEmpty else { return .ignored }
+            selection.clear()
+            return .handled
+        }
+        .onKeyPress(.return) {
+            openSelected(dayEvents: dayEvents, tasks: tasks)
+            return selection.isEmpty ? .ignored : .handled
+        }
         .padding(.horizontal, GridInsets.horizontal)
         .padding(.bottom, GridInsets.bottom)
         .id(manager.dataRevision)
@@ -244,6 +280,8 @@ private struct WeekRow: View {
     let now: Date
     let draftRange: ClosedRange<Date>?
     let draftColor: Color
+    let selection: GridSelection
+    let resolvedTasks: [ResolvedTask]
     let onSelect: (Date) -> Void
     let onAdd: (Date) -> Void
     let onOpenEvent: (DayEvent) -> Void
@@ -310,7 +348,11 @@ private struct WeekRow: View {
                     isToday: calendar.isDateInToday(day),
                     isSelected: calendar.isDate(day, inSameDayAs: manager.selectedDate),
                     isInDraftRange: draftRange?.contains(calendar.startOfDay(for: day)) ?? false,
-                    onSelect: { onSelect(day) },
+                    onSelect: {
+                        // 빈 칸을 누르면 고른 막대는 풀리고, 그 날짜는 골라진다.
+                        selection.clear()
+                        onSelect(day)
+                    },
                     onAdd: { onAdd(day) }
                 )
             }
@@ -321,12 +363,19 @@ private struct WeekRow: View {
     private func segmentView(_ segment: GridSegment, metrics: GridMetrics) -> some View {
         switch segment.kind {
         case .event(let dayEvent):
+            let ids = dayEvent.events.compactMap(\.eventIdentifier)
             EventBar(
                 metrics: metrics,
                 dayEvent: dayEvent,
                 isDimmed: !manager.isInDisplayedMonth(days[segment.startColumn]),
                 continuesBefore: segment.continuesBefore,
                 continuesAfter: segment.continuesAfter,
+                isHighlighted: selection.isHighlighted(anyOf: ids),
+                isSelected: selection.isSelected(anyOf: ids),
+                onSelect: {
+                    guard let id = ids.first else { return }
+                    selection.select(eventID: id, among: resolvedTasks)
+                },
                 onOpen: { onOpenEvent(dayEvent) }
             )
         case .task(let item):
@@ -336,6 +385,9 @@ private struct WeekRow: View {
                 isSpanning: segment.columnSpan > 1 || segment.continuesBefore || segment.continuesAfter,
                 continuesBefore: segment.continuesBefore,
                 continuesAfter: segment.continuesAfter,
+                isHighlighted: selection.isHighlighted(taskID: item.resolved.id),
+                isSelected: selection.isSelected(taskID: item.resolved.id),
+                onSelect: { selection.select(task: item.resolved, among: resolvedTasks) },
                 onOpen: { onOpenTask(item.resolved) }
             )
         case .draft:
@@ -422,6 +474,11 @@ private struct EventBar: View {
     let isDimmed: Bool
     let continuesBefore: Bool
     let continuesAfter: Bool
+    /// 고른 것과 연결돼 함께 선명해지는 중인지.
+    let isHighlighted: Bool
+    /// 직접 고른 것인지. 테두리를 더 두껍게 그린다.
+    let isSelected: Bool
+    let onSelect: () -> Void
     let onOpen: () -> Void
 
     @State private var isShowingPreview = false
@@ -441,7 +498,10 @@ private struct EventBar: View {
 
     var body: some View {
         let color = dayEvent.primary.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray
-        let base = isAllDay ? Self.allDayBackgroundOpacity : Self.timedBackgroundOpacity
+        // 고르면 같은 색을 진하게 올린다. 새 색을 들이지 않는다.
+        let base = isHighlighted
+            ? (isAllDay ? 0.55 : 0.42)
+            : (isAllDay ? Self.allDayBackgroundOpacity : Self.timedBackgroundOpacity)
         let backgroundOpacity = isDimmed ? base * Self.dimFactor : base
 
         HStack(spacing: 0) {
@@ -475,19 +535,21 @@ private struct EventBar: View {
         .foregroundStyle(isDimmed ? Color.primary.opacity(0.45) : .primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(color.opacity(backgroundOpacity))
-        .clipShape(
-            // 이어지는 쪽은 각지게, 끝나는 쪽은 둥글게 해서 연결을 드러낸다.
-            UnevenRoundedRectangle(
-                topLeadingRadius: continuesBefore ? 0 : 3,
-                bottomLeadingRadius: continuesBefore ? 0 : 3,
-                bottomTrailingRadius: continuesAfter ? 0 : 3,
-                topTrailingRadius: continuesAfter ? 0 : 3
-            )
-        )
+        .clipShape(barShape)
+        .overlay {
+            if isHighlighted {
+                barShape.strokeBorder(color, lineWidth: isSelected ? 2 : 1)
+            }
+        }
         .contentShape(Rectangle())
-        .onTapGesture {
+        // 두 번 클릭을 먼저 선언해야 한 번 클릭과 구분된다.
+        .onTapGesture(count: 2) {
             cancelHover()
             onOpen()
+        }
+        .onTapGesture {
+            cancelHover()
+            onSelect()
         }
         .onHover { hovering in
             if hovering {
@@ -504,6 +566,16 @@ private struct EventBar: View {
         .popover(isPresented: $isShowingPreview, arrowEdge: .trailing) {
             EventPreviewCard(dayEvent: dayEvent)
         }
+    }
+
+    /// 이어지는 쪽은 각지게, 끝나는 쪽은 둥글게 해서 연결을 드러낸다.
+    private var barShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: continuesBefore ? 0 : 3,
+            bottomLeadingRadius: continuesBefore ? 0 : 3,
+            bottomTrailingRadius: continuesAfter ? 0 : 3,
+            topTrailingRadius: continuesAfter ? 0 : 3
+        )
     }
 
     private func cancelHover() {
@@ -534,6 +606,9 @@ private struct TaskBar: View {
     let isSpanning: Bool
     let continuesBefore: Bool
     let continuesAfter: Bool
+    let isHighlighted: Bool
+    let isSelected: Bool
+    let onSelect: () -> Void
     let onOpen: () -> Void
 
     @State private var isShowingPreview = false
@@ -579,13 +654,23 @@ private struct TaskBar: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 3)
-                .fill(tint.opacity(item.isEcho ? 0.06 : 0.10))
+                .fill(tint.opacity(fillOpacity))
         )
+        .overlay {
+            if isHighlighted {
+                RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(tint, lineWidth: isSelected ? 2 : 1)
+            }
+        }
         .opacity(isDone ? 0.55 : 1)
         .contentShape(Rectangle())
-        .onTapGesture {
+        .onTapGesture(count: 2) {
             cancelHover()
             onOpen()
+        }
+        .onTapGesture {
+            cancelHover()
+            onSelect()
         }
         .onHover { hovering in
             if hovering {
@@ -608,6 +693,12 @@ private struct TaskBar: View {
         hoverDelay?.cancel()
         hoverDelay = nil
         isShowingPreview = false
+    }
+
+    /// 고르면 같은 색을 진하게 올린다.
+    private var fillOpacity: Double {
+        if isHighlighted { return 0.32 }
+        return item.isEcho ? 0.06 : 0.10
     }
 
     private var tint: Color {

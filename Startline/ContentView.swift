@@ -18,6 +18,8 @@ struct ContentView: View {
     @State private var saver = PersistenceReporter()
     /// 아직 저장되지 않은 일정을 그리드에 미리 보여준다.
     @State private var draft = DraftEventPreview()
+    /// 그리드와 우측 패널이 함께 보는 선택 상태.
+    @State private var selection = GridSelection()
     /// 알림 액션 처리기와 같은 인스턴스를 쓴다.
     private var scheduler: NotificationScheduler { AppDelegate.scheduler }
     /// 그리드에서 클릭한 일정. 우측 패널이 편집 시트를 연다.
@@ -63,6 +65,7 @@ struct ContentView: View {
         .frame(minWidth: 1040, idealWidth: 1400, minHeight: 700, idealHeight: 940)
         .environment(saver)
         .environment(draft)
+        .environment(selection)
         // 명세서 9.2 롤링 스케줄러 — 아래 시점마다 전체를 다시 계산해 예약한다.
         .task { await rescheduleNotifications() }
         .onChange(of: saver.revision) { _, _ in
@@ -172,4 +175,5 @@ private struct AccessDeniedView: View {
         .modelContainer(for: ManagedTask.self, inMemory: true)
         .environment(PersistenceReporter())
         .environment(DraftEventPreview())
+        .environment(GridSelection())
 }

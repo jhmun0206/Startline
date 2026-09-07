@@ -58,7 +58,13 @@ struct PanelCard<Content: View>: View {
 /// 호버가 하나인데 클릭 결과가 둘이면 지금 커서가 어느 쪽에 있는지 알 수 없다.
 /// **밝아지는 범위와 눌리는 범위를 같게 한다.**
 struct HoverRegion<Content: View>: View {
-    let onTap: () -> Void
+    /// 한 번 클릭 — 고르기.
+    let onSelect: () -> Void
+    /// 두 번 클릭 — 고치기.
+    var onOpen: (() -> Void)?
+    /// 고른 것과 연결돼 함께 선명해지는 중인지.
+    var isHighlighted = false
+    var isSelected = false
     /// 네 방향 여백. 영역끼리 맞닿게 하려면 사이 간격을 이 값으로 흡수시킨다.
     /// **이 값이 곧 호버·클릭 영역의 크기다.**
     var inset: CGFloat = CardMetrics.regionInset
@@ -72,16 +78,31 @@ struct HoverRegion<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+                    .fill(fill)
+            }
+            .overlay {
+                if isHighlighted {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.accentColor.opacity(0.55),
+                                      lineWidth: isSelected ? 1.5 : 1)
+                }
             }
             .contentShape(RoundedRectangle(cornerRadius: 6))
             .onHover { isHovering = $0 }
-            .onTapGesture(perform: onTap)
+            // 두 번 클릭을 먼저 선언해야 한 번 클릭과 구분된다.
+            .onTapGesture(count: 2) { (onOpen ?? onSelect)() }
+            .onTapGesture(perform: onSelect)
             .animation(.easeOut(duration: 0.12), value: isHovering)
+            .animation(.easeOut(duration: 0.12), value: isHighlighted)
+    }
+
+    private var fill: Color {
+        if isHighlighted { return Color.accentColor.opacity(isSelected ? 0.16 : 0.10) }
+        return Color.primary.opacity(isHovering ? 0.06 : 0)
     }
 }
 
-/// 계층 제목.
+/// 계층 제목./// 계층 제목.
 struct SectionLabel: View {
     let title: String
     let systemImage: String
@@ -111,6 +132,7 @@ struct EmptyNote: View {
 /// **항목이 0개면 이 블록 자체가 사라진다.**
 struct TodayStartSection: View {
     let tasks: [ResolvedTask]
+    let selection: GridSelection
     let onSelect: (ResolvedTask) -> Void
 
     /// 오늘이 착수마감인 항목 + 착수마감이 지났는데 미시작인 항목.
@@ -138,7 +160,12 @@ struct TodayStartSection: View {
                     // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
                     // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
                     ForEach(attentionTasks) { resolved in
-                        HoverRegion(onTap: { onSelect(resolved) }) {
+                        HoverRegion(
+                            onSelect: { selection.select(task: resolved, among: tasks) },
+                            onOpen: { onSelect(resolved) },
+                            isHighlighted: selection.isHighlighted(taskID: resolved.id),
+                            isSelected: selection.isSelected(taskID: resolved.id)
+                        ) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Circle()
                                     .fill(.orange)

@@ -23,6 +23,7 @@ struct DayDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(PersistenceReporter.self) private var saver
+    @Environment(GridSelection.self) private var selection
 
     // Phase 1 의 항목 수는 적어서 전체를 읽고 메모리에서 거른다. (BL-017)
     @Query(sort: \ManagedTask.createdAt) private var allTasks: [ManagedTask]
@@ -124,7 +125,10 @@ struct DayDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 1계층 「오늘 시작」 — 최상단 고정. 0개면 블록 자체가 사라진다. (명세서 5.2)
-            TodayStartSection(tasks: resolvedTasks) { resolved in
+            TodayStartSection(
+                tasks: resolvedTasks,
+                selection: selection
+            ) { resolved in
                 jump(to: resolved)
             }
 
@@ -139,6 +143,10 @@ struct DayDetailView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
+                // 카드 아래 빈 곳을 누르면 고른 것이 풀린다.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .contentShape(Rectangle())
+                .onTapGesture { selection.clear() }
             }
         }
         .onReceive(clock) { now = $0 }
@@ -240,9 +248,16 @@ struct DayDetailView: View {
     private func eventCard(_ dayEvent: DayEvent) -> some View {
         let attached = attachedTasks(for: dayEvent)
 
+        let ids = dayEvent.events.compactMap(\.eventIdentifier)
+
         if attached.isEmpty {
             PanelCard(inset: CardMetrics.borderGap) {
-                HoverRegion(onTap: { eventToOpen = dayEvent }) {
+                HoverRegion(
+                    onSelect: { selectEvent(ids) },
+                    onOpen: { eventToOpen = dayEvent },
+                    isHighlighted: selection.isHighlighted(anyOf: ids),
+                    isSelected: selection.isSelected(anyOf: ids)
+                ) {
                     EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                 }
             }
@@ -253,8 +268,10 @@ struct DayDetailView: View {
                 // 간격은 위아래 영역의 여백으로 흡수시킨다.
                 VStack(alignment: .leading, spacing: 0) {
                     HoverRegion(
-                        onTap: { eventToOpen = dayEvent },
-                        inset: CardMetrics.regionInset
+                        onSelect: { selectEvent(ids) },
+                        onOpen: { eventToOpen = dayEvent },
+                        isHighlighted: selection.isHighlighted(anyOf: ids),
+                        isSelected: selection.isSelected(anyOf: ids)
                     ) {
                         EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                     }
@@ -262,8 +279,10 @@ struct DayDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(attached) { resolved in
                             HoverRegion(
-                                onTap: { editingTask = resolved.task },
-                                inset: CardMetrics.regionInset
+                                onSelect: { selection.select(task: resolved, among: resolvedTasks) },
+                                onOpen: { editingTask = resolved.task },
+                                isHighlighted: selection.isHighlighted(taskID: resolved.id),
+                                isSelected: selection.isSelected(taskID: resolved.id)
                             ) {
                                 TaskRow(
                                     resolved: resolved,
@@ -300,7 +319,12 @@ struct DayDetailView: View {
             ForEach(sectionTasks) { resolved in
                 // 일정 카드와 같은 방식이다. 하이라이트는 카드 안쪽만 칠한다.
                 PanelCard(inset: CardMetrics.borderGap) {
-                    HoverRegion(onTap: { editingTask = resolved.task }) {
+                    HoverRegion(
+                        onSelect: { selection.select(task: resolved, among: resolvedTasks) },
+                        onOpen: { editingTask = resolved.task },
+                        isHighlighted: selection.isHighlighted(taskID: resolved.id),
+                        isSelected: selection.isSelected(taskID: resolved.id)
+                    ) {
                         TaskRow(
                             resolved: resolved,
                             showsParentContext: true,
@@ -368,6 +392,11 @@ struct DayDetailView: View {
             manager.setDisplayedMonth(due)
         }
         manager.selectedDate = manager.calendar.startOfDay(for: due)
+    }
+
+    private func selectEvent(_ ids: [String]) {
+        guard let id = ids.first else { return }
+        selection.select(eventID: id, among: resolvedTasks)
     }
 
     private func delete(_ resolved: ResolvedTask) {
