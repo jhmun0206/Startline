@@ -23,8 +23,8 @@ struct PanelCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 10)
@@ -60,14 +60,14 @@ struct PanelCard<Content: View>: View {
 struct HoverRegion<Content: View>: View {
     let onTap: () -> Void
     /// 위아래 여백. 영역끼리 맞닿게 하려면 사이 간격을 이 값으로 흡수시킨다.
-    var verticalPadding: CGFloat = 4
+    var verticalPadding: CGFloat = 3
     @ViewBuilder var content: Content
 
     @State private var isHovering = false
 
     var body: some View {
         content
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             .padding(.vertical, verticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
@@ -128,7 +128,7 @@ struct TodayStartSection: View {
     var body: some View {
         if !attentionTasks.isEmpty {
             PanelCard(tint: Color.orange.opacity(0.10)) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
@@ -206,7 +206,7 @@ struct TaskRow: View {
     private var task: ManagedTask { resolved.task }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 7) {
             if isNested {
                 Spacer().frame(width: 14)
             }
@@ -219,7 +219,7 @@ struct TaskRow: View {
             }
             .buttonStyle(.borderless)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(showsParentContext ? resolved.contextualTitle : task.title)
                         .font(.body)
@@ -249,7 +249,7 @@ struct TaskRow: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onEdit)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .contextMenu {
             if task.status == .notStarted {
                 // 명세서 9.1 — 이 기록이 10장 캘리브레이션의 입력이 된다.

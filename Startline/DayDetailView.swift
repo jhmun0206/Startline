@@ -131,7 +131,7 @@ struct DayDetailView: View {
             header
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
                     eventSection
                     if !sectionTasks.isEmpty {
                         taskSection
@@ -218,7 +218,7 @@ struct DayDetailView: View {
     // MARK: - 2계층: 일정 + 딸린 할 일
 
     private var eventSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionLabel(title: "일정", systemImage: "calendar")
 
             if events.isEmpty {
@@ -232,7 +232,10 @@ struct DayDetailView: View {
     }
 
     /// 일정과 딸린 할 일 영역이 맞닿도록 잡은 위아래 여백.
-    private static let nestedRegionPadding: CGFloat = 7
+    ///
+    /// **이 값이 곧 호버·클릭 영역의 높이다.** 줄이면 두 영역은 여전히 맞닿지만
+    /// 각 영역이 얇아진다. 너무 줄이면 겨냥하기 어려워진다.
+    private static let nestedRegionPadding: CGFloat = 5
 
     /// 일정 카드 하나.
     ///
@@ -296,7 +299,7 @@ struct DayDetailView: View {
     // MARK: - 3계층: 이 날의 할 일
 
     private var taskSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionLabel(title: "할 일", systemImage: "checklist")
 
             ForEach(sectionTasks) { resolved in
@@ -317,7 +320,7 @@ struct DayDetailView: View {
     // MARK: - 머리글
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(dateTitle)
                     .font(.title3.bold())
@@ -410,13 +413,13 @@ struct EventRow: View {
     private var event: EKEvent { dayEvent.primary }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(event.calendar.map { Color(cgColor: $0.cgColor) } ?? .gray)
                 .frame(width: 3)
                 .frame(maxHeight: .infinity)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(timeText)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -434,7 +437,7 @@ struct EventRow: View {
                 calendarLabel
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
         .fixedSize(horizontal: false, vertical: true)
     }
 
