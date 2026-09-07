@@ -111,16 +111,8 @@ struct MonthGridView: View {
     private var gridSizeReader: some View {
         GeometryReader { proxy in
             Color.clear
-                .onAppear {
-                    gridSize = proxy.size
-                    NSLog("[Startline·drag] gridSize 최초 측정 %.0fx%.0f",
-                          proxy.size.width, proxy.size.height)
-                }
-                .onChange(of: proxy.size) { _, newValue in
-                    gridSize = newValue
-                    NSLog("[Startline·drag] gridSize 갱신 %.0fx%.0f (창 크기 변경)",
-                          newValue.width, newValue.height)
-                }
+                .onAppear { gridSize = proxy.size }
+                .onChange(of: proxy.size) { _, newValue in gridSize = newValue }
         }
     }
 
@@ -140,21 +132,12 @@ struct MonthGridView: View {
                 // 시작점은 그리드 안이어야 한다. 끄는 도중에는 밖으로 나가도 따라온다.
                 guard let anchor = GridHitTest.date(
                     at: value.startLocation, in: gridSize, days: days
-                ) else {
-                    NSLog("[Startline·drag] 시작 좌표 (%.0f, %.0f) 가 본문 %.0fx%.0f 밖 → 무시",
-                          value.startLocation.x, value.startLocation.y,
-                          gridSize.width, gridSize.height)
-                    return
-                }
+                ) else { return }
 
                 let current = GridHitTest.date(
                     at: value.location, in: gridSize, days: days, clamped: true
                 ) ?? anchor
 
-                if dragAnchor == nil {
-                    NSLog("[Startline·drag] 시작 — 본문 %.0fx%.0f, %d주",
-                          gridSize.width, gridSize.height, days.count / 7)
-                }
                 dragAnchor = anchor
                 dragCurrent = current
                 draft.set(start: min(anchor, current), end: max(anchor, current), isDragging: true)
@@ -166,26 +149,16 @@ struct MonthGridView: View {
                     dragCurrent = nil
                 }
                 guard let range, range.lowerBound != range.upperBound else {
-                    NSLog("[Startline·drag] 끝 — 범위가 없거나 하루뿐이라 시트를 열지 않음")
                     // 시트가 안 열리므로 임시 막대도 거둔다.
                     draft.clear()
                     return
                 }
                 // 여기서 지우지 않는다. 곧 열릴 시트가 같은 범위를 이어받아
                 // 막대가 끊기지 않고 그대로 남는다.
-                NSLog("[Startline·drag] 끝 — %@ ~ %@ 로 시트 염",
-                      Self.logFormatter.string(from: range.lowerBound),
-                      Self.logFormatter.string(from: range.upperBound))
                 manager.selectedDate = range.lowerBound
                 onAddRange(range.lowerBound, range.upperBound)
             }
     }
-
-    private static let logFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
 
     /// 그리드 본문 크기. `gridSizeReader` 가 채우고 창 크기 변화를 따라간다.
     @State private var gridSize: CGSize = .zero
