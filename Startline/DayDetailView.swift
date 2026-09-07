@@ -241,12 +241,13 @@ struct DayDetailView: View {
         let attached = attachedTasks(for: dayEvent)
 
         if attached.isEmpty {
-            PanelCard(isInteractive: true) {
-                EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+            PanelCard(inset: CardMetrics.borderGap) {
+                HoverRegion(onTap: { eventToOpen = dayEvent }) {
+                    EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                }
             }
-            .onTapGesture { eventToOpen = dayEvent }
         } else {
-            PanelCard {
+            PanelCard(inset: CardMetrics.borderGap) {
                 // 사이 간격을 두지 않는다. 간격이 남으면 그 띠가 어느 영역에도 속하지 않아
                 // 커서를 세로로 옮길 때 하이라이트가 끊긴다.
                 // 간격은 위아래 영역의 여백으로 흡수시킨다.
@@ -297,16 +298,17 @@ struct DayDetailView: View {
             SectionLabel(title: "할 일", systemImage: "checklist")
 
             ForEach(sectionTasks) { resolved in
-                PanelCard(isInteractive: true) {
-                    TaskRow(
-                        resolved: resolved,
-                        showsParentContext: true,
-                        onEdit: { editingTask = resolved.task },
-                        onDelete: { delete(resolved) }
-                    )
+                // 일정 카드와 같은 방식이다. 하이라이트는 카드 안쪽만 칠한다.
+                PanelCard(inset: CardMetrics.borderGap) {
+                    HoverRegion(onTap: { editingTask = resolved.task }) {
+                        TaskRow(
+                            resolved: resolved,
+                            showsParentContext: true,
+                            onEdit: { editingTask = resolved.task },
+                            onDelete: { delete(resolved) }
+                        )
+                    }
                 }
-                // 일정 카드와 같은 방식으로 맞춘다. 카드 전체가 클릭 영역이다.
-                .onTapGesture { editingTask = resolved.task }
             }
         }
     }

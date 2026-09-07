@@ -310,10 +310,23 @@ nonisolated struct WeekLayout {
         let endColumn: Int
         let continuesBefore: Bool
         let continuesAfter: Bool
-        let sortKey: String
+
+        // ── 같은 자리를 다툴 때의 순서 ──
+        // 우측 패널과 같은 규칙이어야 한다. 종일 먼저, 그 다음 시작시각, 그 다음 제목.
+        let isAllDay: Bool
+        let start: Date
+        let title: String
 
         func overlaps(_ other: PendingItem) -> Bool {
             startColumn <= other.endColumn && other.startColumn <= endColumn
+        }
+
+        /// 문자열 하나로 뭉치지 않는다. `"false|…" < "true|…"` 처럼
+        /// 사전순이 의도와 반대로 뒤집히는 일이 생긴다.
+        func isOrderedBefore(_ other: PendingItem) -> Bool {
+            if isAllDay != other.isAllDay { return isAllDay }
+            if start != other.start { return start < other.start }
+            return title < other.title
         }
     }
 
@@ -324,7 +337,7 @@ nonisolated struct WeekLayout {
             let rspan = rhs.endColumn - rhs.startColumn
             if lspan != rspan { return lspan > rspan }
             if lhs.startColumn != rhs.startColumn { return lhs.startColumn < rhs.startColumn }
-            return lhs.sortKey < rhs.sortKey
+            return lhs.isOrderedBefore(rhs)
         }
 
         var placed: [(item: PendingItem, lane: Int)] = []
@@ -372,7 +385,9 @@ nonisolated struct WeekLayout {
                 endColumn: endColumn,
                 continuesBefore: start < weekStart,
                 continuesAfter: end > weekEnd,
-                sortKey: item.resolved.task.title
+                isAllDay: false,
+                start: item.resolved.startDeadline ?? item.resolved.effectiveDueAt ?? item.startDay,
+                title: item.resolved.task.title
             )
         }
     }
@@ -400,7 +415,9 @@ nonisolated struct WeekLayout {
             continuesBefore: start < weekStart,
             continuesAfter: end > weekEnd,
             // 같은 길이면 먼저 자리를 잡아 위쪽 레인에 놓이게 한다.
-            sortKey: ""
+            isAllDay: true,
+            start: .distantPast,
+            title: ""
         )
     }
 
@@ -439,7 +456,9 @@ nonisolated struct WeekLayout {
                         endColumn: span.end,
                         continuesBefore: start.map { $0 < weekStart } ?? false,
                         continuesAfter: end.map { $0 > weekEnd } ?? false,
-                        sortKey: dayEvent.id
+                        isAllDay: event.isAllDay,
+                        start: event.startDate ?? .distantFuture,
+                        title: event.title ?? ""
                     )
                 )
             }

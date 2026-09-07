@@ -16,43 +16,35 @@ import SwiftUI
 /// 우측 패널 카드의 안쪽 여백. 네 방향 모두 같은 값을 쓴다.
 /// 한쪽만 넓으면 카드가 비뚤어 보인다.
 enum CardMetrics {
-    /// 카드 경계에서 내용까지.
+    /// 카드 경계에서 내용까지. 호버 영역이 없는 카드가 쓴다.
     static let inset: CGFloat = 8
-    /// 카드 안에서 눌리는 단위 하나의 여백.
+    /// 카드 경계에서 **호버 영역**까지.
+    /// 하이라이트가 테두리에 닿지 않도록 남기는 틈이다.
+    static let borderGap: CGFloat = 3
+    /// 호버 영역에서 내용까지.
+    ///
+    /// `borderGap + regionInset == inset` 이라, 호버 영역을 끼워도
+    /// 내용이 놓이는 자리는 그대로다.
     static let regionInset: CGFloat = 5
 }
 
 struct PanelCard<Content: View>: View {
     var tint: Color = .clear
-    /// 눌러서 여는 카드인지. 마우스를 올리면 배경이 살짝 바뀌어 누를 수 있음을 알린다.
-    var isInteractive = false
+    /// 안쪽 여백. 호버 영역을 품는 카드는 `CardMetrics.borderGap` 을 넘긴다.
+    var inset: CGFloat = CardMetrics.inset
     @ViewBuilder var content: Content
-
-    @State private var isHovering = false
 
     var body: some View {
         content
-            .padding(CardMetrics.inset)
+            .padding(inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(baseColor)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
-                    }
+                RoundedRectangle(cornerRadius: 10).fill(baseColor)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
             }
-            // 카드 전체가 눌리도록 모양을 명시한다. 안쪽 뷰가 좁아도 빈 곳이 반응한다.
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-            .onHover { hovering in
-                guard isInteractive else { return }
-                isHovering = hovering
-            }
-            .animation(.easeOut(duration: 0.12), value: isHovering)
     }
 
     private var baseColor: Color {
@@ -135,26 +127,28 @@ struct TodayStartSection: View {
 
     var body: some View {
         if !attentionTasks.isEmpty {
-            PanelCard(tint: Color.orange.opacity(0.10)) {
+            PanelCard(tint: Color.orange.opacity(0.10), inset: CardMetrics.borderGap) {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
+                        // 아래 항목들과 왼쪽 끝을 맞춘다.
+                        .padding(.horizontal, CardMetrics.regionInset)
 
                     // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
                     // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
                     ForEach(attentionTasks) { resolved in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Circle()
-                                .fill(.orange)
-                                .frame(width: 5, height: 5)
-                            Text(resolved.contextualTitle)
-                                .font(.callout)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
+                        HoverRegion(onTap: { onSelect(resolved) }) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Circle()
+                                    .fill(.orange)
+                                    .frame(width: 5, height: 5)
+                                Text(resolved.contextualTitle)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(resolved) }
                     }
                 }
             }
