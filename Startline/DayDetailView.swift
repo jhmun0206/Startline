@@ -210,11 +210,9 @@ struct DayDetailView: View {
                 EmptyNote(text: "일정이 없습니다.")
             } else {
                 ForEach(events) { dayEvent in
-                    PanelCard {
+                    PanelCard(isInteractive: true) {
                         VStack(alignment: .leading, spacing: 8) {
                             EventRow(dayEvent: dayEvent, day: manager.selectedDate)
-                                .contentShape(Rectangle())
-                                .onTapGesture { eventToOpen = dayEvent }
 
                             let attached = attachedTasks(for: dayEvent)
                             if !attached.isEmpty {
@@ -226,10 +224,16 @@ struct DayDetailView: View {
                                         onEdit: { editingTask = resolved.task },
                                         onDelete: { delete(resolved) }
                                     )
+                                    // 딸린 할 일 줄은 통째로 할 일 몫이다.
+                                    // 자식이 먼저 탭을 가져가므로 아래 카드 제스처가 가려진다.
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { editingTask = resolved.task }
                                 }
                             }
                         }
                     }
+                    // 카드 어디를 눌러도 일정이 열린다. 딸린 할 일 줄만 예외다.
+                    .onTapGesture { eventToOpen = dayEvent }
                 }
             }
         }
@@ -249,7 +253,7 @@ struct DayDetailView: View {
             SectionLabel(title: "할 일", systemImage: "checklist")
 
             ForEach(sectionTasks) { resolved in
-                PanelCard {
+                PanelCard(isInteractive: true) {
                     TaskRow(
                         resolved: resolved,
                         showsParentContext: true,
@@ -257,6 +261,8 @@ struct DayDetailView: View {
                         onDelete: { delete(resolved) }
                     )
                 }
+                // 일정 카드와 같은 방식으로 맞춘다. 카드 전체가 클릭 영역이다.
+                .onTapGesture { editingTask = resolved.task }
             }
         }
     }

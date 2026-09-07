@@ -15,21 +15,40 @@ import SwiftUI
 /// 텍스트만 나열하면 어디까지가 한 항목인지 알 수 없다.
 struct PanelCard<Content: View>: View {
     var tint: Color = .clear
+    /// 눌러서 여는 카드인지. 마우스를 올리면 배경이 살짝 바뀌어 누를 수 있음을 알린다.
+    var isInteractive = false
     @ViewBuilder var content: Content
+
+    @State private var isHovering = false
 
     var body: some View {
         content
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(tint == .clear ? Color(nsColor: .controlBackgroundColor) : tint)
-            )
-            .overlay(
+                    .fill(baseColor)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+                    }
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
-            )
+            }
+            // 카드 전체가 눌리도록 모양을 명시한다. 안쪽 뷰가 좁아도 빈 곳이 반응한다.
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .onHover { hovering in
+                guard isInteractive else { return }
+                isHovering = hovering
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private var baseColor: Color {
+        tint == .clear ? Color(nsColor: .controlBackgroundColor) : tint
     }
 }
 
