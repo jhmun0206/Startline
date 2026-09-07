@@ -38,8 +38,7 @@ nonisolated enum GridItemKind {
 /// **칸 크기에 따라 단계적으로 바뀐다.** 창을 넓혀도 값이 고정이면 여백만 늘고
 /// 내용은 그대로라, 넓은 화면일수록 오히려 빈약해 보인다.
 nonisolated struct GridMetrics {
-    var eventBarHeight: CGFloat = 18
-    /// 할 일은 더 얇게. 레인을 덜 먹어야 점선이 며칠씩 뻗어도 칸이 버틴다.
+    var eventBarHeight: CGFloat = 14
     var taskBarHeight: CGFloat = 14
     var spacing: CGFloat = 3
     var numberRowHeight: CGFloat = 23
@@ -47,6 +46,7 @@ nonisolated struct GridMetrics {
     var dayNumberFontSize: CGFloat = 13
     /// 일정이 있을 때 일정 몫으로 남겨 두는 최소 레인 수.
     /// 할 일이 칸을 통째로 먹어 일정이 전부 `+N` 으로 밀리는 것을 막는다.
+    /// 막대 굵기가 같아진 뒤에도 이 보호는 유지한다 — 할 일 밴드가 위에 오기 때문이다.
     var reservedEventLanes: Int = 2
 
     /// 칸 높이에 맞는 밀도를 고른다.
@@ -56,17 +56,17 @@ nonisolated struct GridMetrics {
         switch height {
         case ..<92:
             return GridMetrics(
-                eventBarHeight: 15, taskBarHeight: 11, spacing: 2,
+                eventBarHeight: 11, taskBarHeight: 11, spacing: 2,
                 numberRowHeight: 20, titleFontSize: 10, dayNumberFontSize: 12
             )
         case ..<140:
             return GridMetrics(
-                eventBarHeight: 18, taskBarHeight: 14, spacing: 3,
+                eventBarHeight: 14, taskBarHeight: 14, spacing: 3,
                 numberRowHeight: 23, titleFontSize: 11, dayNumberFontSize: 13
             )
         default:
             return GridMetrics(
-                eventBarHeight: 22, taskBarHeight: 17, spacing: 4,
+                eventBarHeight: 17, taskBarHeight: 17, spacing: 4,
                 numberRowHeight: 27, titleFontSize: 12.5, dayNumberFontSize: 14
             )
         }
