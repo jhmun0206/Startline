@@ -59,6 +59,8 @@ struct PanelCard<Content: View>: View {
 /// **밝아지는 범위와 눌리는 범위를 같게 한다.**
 struct HoverRegion<Content: View>: View {
     let onTap: () -> Void
+    /// 위아래 여백. 영역끼리 맞닿게 하려면 사이 간격을 이 값으로 흡수시킨다.
+    var verticalPadding: CGFloat = 4
     @ViewBuilder var content: Content
 
     @State private var isHovering = false
@@ -66,7 +68,7 @@ struct HoverRegion<Content: View>: View {
     var body: some View {
         content
             .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.vertical, verticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 6)

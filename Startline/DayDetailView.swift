@@ -231,6 +231,9 @@ struct DayDetailView: View {
         }
     }
 
+    /// 일정과 딸린 할 일 영역이 맞닿도록 잡은 위아래 여백.
+    private static let nestedRegionPadding: CGFloat = 7
+
     /// 일정 카드 하나.
     ///
     /// 딸린 할 일이 없으면 카드 전체가 하나의 클릭 대상이라 카드째 밝아진다.
@@ -247,22 +250,36 @@ struct DayDetailView: View {
             .onTapGesture { eventToOpen = dayEvent }
         } else {
             PanelCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    HoverRegion(onTap: { eventToOpen = dayEvent }) {
+                // 사이 간격을 두지 않는다. 간격이 남으면 그 띠가 어느 영역에도 속하지 않아
+                // 커서를 세로로 옮길 때 하이라이트가 끊긴다.
+                // 간격은 위아래 영역의 여백으로 흡수시킨다.
+                VStack(alignment: .leading, spacing: 0) {
+                    HoverRegion(
+                        onTap: { eventToOpen = dayEvent },
+                        verticalPadding: Self.nestedRegionPadding
+                    ) {
                         EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                     }
 
-                    Divider()
-
-                    ForEach(attached) { resolved in
-                        HoverRegion(onTap: { editingTask = resolved.task }) {
-                            TaskRow(
-                                resolved: resolved,
-                                isNested: true,
-                                onEdit: { editingTask = resolved.task },
-                                onDelete: { delete(resolved) }
-                            )
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(attached) { resolved in
+                            HoverRegion(
+                                onTap: { editingTask = resolved.task },
+                                verticalPadding: Self.nestedRegionPadding
+                            ) {
+                                TaskRow(
+                                    resolved: resolved,
+                                    isNested: true,
+                                    onEdit: { editingTask = resolved.task },
+                                    onDelete: { delete(resolved) }
+                                )
+                            }
                         }
+                    }
+                    // 구분선은 레이아웃 자리를 차지하지 않게 겹쳐 그린다.
+                    // 자리를 차지하면 그만큼 다시 빈틈이 생긴다.
+                    .overlay(alignment: .top) {
+                        Divider().allowsHitTesting(false)
                     }
                 }
             }
