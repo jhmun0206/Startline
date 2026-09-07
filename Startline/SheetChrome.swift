@@ -40,24 +40,71 @@ struct SheetHeader: View {
                 .font(.subheadline.bold())
                 .foregroundStyle(.secondary)
             Spacer()
-            Button {
+            CloseButton {
                 if hasUnsavedInput {
                     isConfirmingClose = true
                 } else {
                     onClose()
                 }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
-            .keyboardShortcut(.cancelAction)
-            .help("닫기")
         }
         .padding(.horizontal, SheetMetrics.padding)
         .padding(.top, 14)
         .padding(.bottom, 10)
+        .alert("쓰던 내용을 버릴까요?", isPresented: $isConfirmingClose) {
+            Button("버리고 닫기", role: .destructive, action: onClose)
+            Button("계속 쓰기", role: .cancel) {}
+        } message: {
+            Text("저장하지 않은 내용은 사라져요.")
+        }
+    }
+}
+
+/// 원형 배경을 두른 닫기 버튼.
+///
+/// 아이콘만 두면 배경과 구분되지 않아 누를 수 있는 것으로 보이지 않는다.
+/// 시스템 창의 닫기 버튼처럼 원형 바탕을 깔고, 올렸을 때와 눌렀을 때 색이 짙어진다.
+private struct CloseButton: View {
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .bold))
+        }
+        .buttonStyle(CloseButtonStyle(isHovering: isHovering))
+        .keyboardShortcut(.cancelAction)
+        .onHover { isHovering = $0 }
+        .help("닫기")
+    }
+}
+
+private struct CloseButtonStyle: ButtonStyle {
+    let isHovering: Bool
+
+    /// 아이콘보다 넉넉하게. 작은 표적은 겨냥하기 어렵다.
+    private static let hitSize: CGFloat = 28
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(foreground(isPressed: configuration.isPressed))
+            .frame(width: Self.hitSize, height: Self.hitSize)
+            .background(Circle().fill(background(isPressed: configuration.isPressed)))
+            .contentShape(Circle())
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+
+    private func background(isPressed: Bool) -> Color {
+        if isPressed { return .secondary.opacity(0.34) }
+        if isHovering { return .secondary.opacity(0.22) }
+        return .secondary.opacity(0.13)
+    }
+
+    private func foreground(isPressed: Bool) -> Color {
+        isPressed || isHovering ? .primary : .secondary
     }
 }
 
