@@ -52,6 +52,33 @@ struct PanelCard<Content: View>: View {
     }
 }
 
+/// 카드 안에서 **눌리는 단위 하나**를 감싼다.
+///
+/// 한 카드에 클릭 대상이 둘 이상이면(일정 + 딸린 할 일) 카드 전체를 밝히면 안 된다.
+/// 호버가 하나인데 클릭 결과가 둘이면 지금 커서가 어느 쪽에 있는지 알 수 없다.
+/// **밝아지는 범위와 눌리는 범위를 같게 한다.**
+struct HoverRegion<Content: View>: View {
+    let onTap: () -> Void
+    @ViewBuilder var content: Content
+
+    @State private var isHovering = false
+
+    var body: some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { isHovering = $0 }
+            .onTapGesture(perform: onTap)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+}
+
 /// 계층 제목.
 struct SectionLabel: View {
     let title: String

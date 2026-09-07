@@ -225,30 +225,45 @@ struct DayDetailView: View {
                 EmptyNote(text: "일정이 없습니다.")
             } else {
                 ForEach(events) { dayEvent in
-                    PanelCard(isInteractive: true) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                    eventCard(dayEvent)
+                }
+            }
+        }
+    }
 
-                            let attached = attachedTasks(for: dayEvent)
-                            if !attached.isEmpty {
-                                Divider()
-                                ForEach(attached) { resolved in
-                                    TaskRow(
-                                        resolved: resolved,
-                                        isNested: true,
-                                        onEdit: { editingTask = resolved.task },
-                                        onDelete: { delete(resolved) }
-                                    )
-                                    // 딸린 할 일 줄은 통째로 할 일 몫이다.
-                                    // 자식이 먼저 탭을 가져가므로 아래 카드 제스처가 가려진다.
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { editingTask = resolved.task }
-                                }
-                            }
+    /// 일정 카드 하나.
+    ///
+    /// 딸린 할 일이 없으면 카드 전체가 하나의 클릭 대상이라 카드째 밝아진다.
+    /// 딸린 할 일이 있으면 **밝아지는 범위를 눌리는 범위에 맞춰 쪼갠다** —
+    /// 일정 영역과 할 일 줄이 각각 따로 밝아지고, 동시에 밝아지지 않는다.
+    @ViewBuilder
+    private func eventCard(_ dayEvent: DayEvent) -> some View {
+        let attached = attachedTasks(for: dayEvent)
+
+        if attached.isEmpty {
+            PanelCard(isInteractive: true) {
+                EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+            }
+            .onTapGesture { eventToOpen = dayEvent }
+        } else {
+            PanelCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    HoverRegion(onTap: { eventToOpen = dayEvent }) {
+                        EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+                    }
+
+                    Divider()
+
+                    ForEach(attached) { resolved in
+                        HoverRegion(onTap: { editingTask = resolved.task }) {
+                            TaskRow(
+                                resolved: resolved,
+                                isNested: true,
+                                onEdit: { editingTask = resolved.task },
+                                onDelete: { delete(resolved) }
+                            )
                         }
                     }
-                    // 카드 어디를 눌러도 일정이 열린다. 딸린 할 일 줄만 예외다.
-                    .onTapGesture { eventToOpen = dayEvent }
                 }
             }
         }
