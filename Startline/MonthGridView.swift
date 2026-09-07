@@ -217,51 +217,21 @@ struct MonthGridView: View {
 
     // MARK: - 할 일 배치
 
-    /// 할 일을 그리드에 배정한다.
-    ///
-    /// **마감일이 아니라 시작일에서 출발한다.** 마감일에만 찍으면 일반 투두 앱과 다를 게 없다.
-    /// 시작일부터 마감일까지 점선으로 이어 "언제부터 언제까지"가 한눈에 보이게 한다.
-    /// 리드타임이 없으면 시작일 자체가 없으므로 마감일에 점 하나만 찍는다.
-    /// 시작 시점이 지났는데 아직 시작하지 않았으면 오늘 칸에도 함께 띄운다 — 놓치면 안 되므로.
+    /// 할 일을 그리드에 배정한다. 규칙은 `GridTaskPlacement` 에 있다.
     private func taskItems(in days: [Date]) -> [GridTaskItem] {
         guard let first = days.first, let last = days.last else { return [] }
 
-        let resolver = TaskResolver(manager: manager, now: now)
-        let rangeStart = calendar.startOfDay(for: first)
-        let rangeEnd = calendar.startOfDay(for: last)
-        let today = calendar.startOfDay(for: now)
-
-        var items: [GridTaskItem] = []
-
-        for resolved in resolver.resolve(allTasks) {
-            guard let due = resolved.effectiveDueAt.map({ calendar.startOfDay(for: $0) })
-            else { continue }
-
-            // 착수마감이 없으면(리드타임 없음) 마감일에 점 하나.
-            let start = resolved.startDeadline.map { calendar.startOfDay(for: $0) } ?? due
-            // 점선 표시를 끄면 시작 지점만 남긴다.
-            let end = manager.showsTaskSpan ? max(start, due) : start
-
-            if start <= rangeEnd, end >= rangeStart {
-                items.append(
-                    GridTaskItem(resolved: resolved, startDay: start, endDay: end, isEcho: false)
-                )
-            }
-
-            if resolved.task.status == .notStarted,
-               let startDeadline = resolved.startDeadline,
-               startDeadline < now,
-               start != today,
-               today >= rangeStart, today <= rangeEnd {
-                items.append(
-                    GridTaskItem(resolved: resolved, startDay: today, endDay: today, isEcho: true)
-                )
-            }
-        }
-
-        return items
+        return GridTaskPlacement.items(
+            for: TaskResolver(manager: manager, now: now).resolve(allTasks),
+            gridStart: first,
+            gridEnd: last,
+            now: now,
+            showsSpan: manager.showsTaskSpan,
+            calendar: calendar
+        )
     }
 }
+
 
 // MARK: - 한 주
 

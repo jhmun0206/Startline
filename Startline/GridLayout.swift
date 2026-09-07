@@ -101,6 +101,66 @@ nonisolated struct DraftRangeItem {
     let endDay: Date
 }
 
+/// 할 일을 그리드 날짜에 배정한다.
+///
+/// 순수 함수라 오늘 날짜·표시 범위를 바꿔 가며 검증할 수 있다.
+nonisolated enum GridTaskPlacement {
+
+    /// - Parameters:
+    ///   - tasks: 계산이 끝난 할 일 전체.
+    ///   - gridStart / gridEnd: 그리드에 놓인 첫 날과 마지막 날.
+    ///   - showsSpan: 착수일부터 마감일까지 점선으로 이을지.
+    static func items(
+        for tasks: [ResolvedTask],
+        gridStart: Date,
+        gridEnd: Date,
+        now: Date,
+        showsSpan: Bool,
+        calendar: Calendar
+    ) -> [GridTaskItem] {
+        let rangeStart = calendar.startOfDay(for: gridStart)
+        let rangeEnd = calendar.startOfDay(for: gridEnd)
+        let today = calendar.startOfDay(for: now)
+
+        var items: [GridTaskItem] = []
+
+        for resolved in tasks {
+            guard let due = resolved.effectiveDueAt.map({ calendar.startOfDay(for: $0) })
+            else { continue }
+
+            // 착수마감이 없으면(리드타임 없음) 마감일에 점 하나.
+            let start = resolved.startDeadline.map { calendar.startOfDay(for: $0) } ?? due
+            // 점선 표시를 끄면 시작 지점만 남긴다.
+            let end = showsSpan ? max(start, due) : start
+
+            if start <= rangeEnd, end >= rangeStart {
+                items.append(
+                    GridTaskItem(resolved: resolved, startDay: start, endDay: end, isEcho: false)
+                )
+            }
+
+            // 시작 시점이 지났는데 아직 시작하지 않았으면 오늘 칸에도 띄운다 — 놓치면 안 되므로.
+            //
+            // **본 막대가 이미 오늘을 덮고 있으면 띄우지 않는다.**
+            // 착수일부터 마감일까지 뻗는 막대가 오늘을 지나가는데 오늘 칸에 또 그리면,
+            // 같은 할 일이 한 줄로 이어진 막대와 별개 막대로 두 번 보인다.
+            let spanCoversToday = start <= today && today <= end
+
+            if resolved.task.status == .notStarted,
+               let startDeadline = resolved.startDeadline,
+               startDeadline < now,
+               !spanCoversToday,
+               today >= rangeStart, today <= rangeEnd {
+                items.append(
+                    GridTaskItem(resolved: resolved, startDay: today, endDay: today, isEcho: true)
+                )
+            }
+        }
+
+        return items
+    }
+}
+
 /// 그리드 막대 하나가 나타내는 것.
 nonisolated enum GridItemKind {
     case event(DayEvent)
