@@ -27,6 +27,37 @@ struct MonthGridView: View {
 
     /// 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
+    /// 그 좌표에 막대(일정·할 일)가 놓여 있는지.
+    ///
+    /// 주 행의 배치를 그대로 다시 계산해 판정한다. 화면에 그리는 것과 같은 함수를 쓰므로
+    /// 보이는 막대와 판정이 어긋나지 않는다.
+    private func startsOnBar(
+        _ point: CGPoint,
+        days: [Date],
+        dayEvents: [Date: [DayEvent]],
+        tasks: [GridTaskItem]
+    ) -> Bool {
+        let weekCount = days.count / 7
+        guard weekCount > 0,
+              let cell = GridHitTest.cell(at: point, in: gridSize, weekCount: weekCount)
+        else { return false }
+
+        let rowHeight = gridSize.height / CGFloat(weekCount)
+        let week = Array(days[(cell.row * 7)..<(cell.row * 7 + 7)])
+
+        let layout = WeekLayout.build(
+            days: week,
+            dayEvents: dayEvents,
+            tasks: tasks,
+            availableHeight: rowHeight,
+            metrics: GridMetrics.forRowHeight(rowHeight),
+            calendar: calendar
+        )
+
+        let yInRow = point.y - rowHeight * CGFloat(cell.row)
+        return layout.segment(atColumn: cell.column, y: yInRow) != nil
+    }
+
     /// 임시 막대에 쓸 색. 새 일정이 들어갈 기본 캘린더 색을 따른다.
     private var draftColor: Color {
         manager.defaultWritableCalendar.map { Color(cgColor: $0.cgColor) } ?? .accentColor
@@ -35,6 +66,8 @@ struct MonthGridView: View {
     /// 여백을 뺀 그리드 본문 좌표계 이름.
     private static let gridSpace = "startline.grid"
 
+    /// 막대 위에서 시작한 드래그. 기간 선택으로 잇지 않는다.
+    @State private var dragRejected = false
     /// 드래그로 기간을 고르는 중.
     @State private var dragAnchor: Date?
     @State private var dragCurrent: Date?
@@ -101,7 +134,7 @@ struct MonthGridView: View {
         // 여백을 뺀 본문 기준 좌표계. 제스처가 이 기준으로 좌표를 준다.
         .coordinateSpace(name: Self.gridSpace)
         .contentShape(Rectangle())
-        .gesture(rangeDrag(days: days))
+        .gesture(rangeDrag(days: days, dayEvents: dayEvents, tasks: tasks))
         .padding(.horizontal, GridInsets.horizontal)
         .padding(.bottom, GridInsets.bottom)
         .id(manager.dataRevision)
@@ -125,10 +158,25 @@ struct MonthGridView: View {
         return lower...upper
     }
 
-    private func rangeDrag(days: [Date]) -> some Gesture {
+    private func rangeDrag(
+        days: [Date],
+        dayEvents: [Date: [DayEvent]],
+        tasks: [GridTaskItem]
+    ) -> some Gesture {
         // 최소 이동 거리를 두어 한 번 클릭·더블클릭과 부딪히지 않게 한다.
         DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.gridSpace))
             .onChanged { value in
+                // 막대 위에서 시작한 드래그는 기간 선택으로 잇지 않는다.
+                //
+                // 막대를 끌어 일정을 옮기는 기능은 나중 몫이다. EventKit 이동은 실제
+                // 캘린더에 반영되고 연결된 계정·기기로 퍼지는데, 되돌릴 수단이 아직 없다.
+                // 실수로 끈 것을 복구할 방법이 없으므로 지금은 아무 일도 하지 않는다. (BL-041)
+                if dragAnchor == nil, !dragRejected,
+                   startsOnBar(value.startLocation, days: days, dayEvents: dayEvents, tasks: tasks) {
+                    dragRejected = true
+                }
+                guard !dragRejected else { return }
+
                 // 시작점은 그리드 안이어야 한다. 끄는 도중에는 밖으로 나가도 따라온다.
                 guard let anchor = GridHitTest.date(
                     at: value.startLocation, in: gridSize, days: days
@@ -144,10 +192,14 @@ struct MonthGridView: View {
             }
             .onEnded { _ in
                 let range = dragRange
+                let rejected = dragRejected
                 defer {
                     dragAnchor = nil
                     dragCurrent = nil
+                    dragRejected = false
                 }
+                // 막대에서 시작했으면 아무 일도 하지 않는다. 막대의 탭은 그대로 동작한다.
+                guard !rejected else { return }
                 guard let range, range.lowerBound != range.upperBound else {
                     // 시트가 안 열리므로 임시 막대도 거둔다.
                     draft.clear()

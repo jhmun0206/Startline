@@ -172,6 +172,20 @@ nonisolated struct WeekLayout {
     /// `+N` 을 그릴 세로 위치.
     let overflowY: CGFloat
 
+    /// 주 안 좌표에 놓인 막대. 없으면 `nil`.
+    ///
+    /// - Parameters:
+    ///   - column: 주 안에서의 열 (0 = 첫 요일).
+    ///   - y: 주 행 위쪽에서의 세로 위치.
+    func segment(atColumn column: Int, y: CGFloat) -> GridSegment? {
+        segments.first { segment in
+            segment.startColumn <= column
+                && column <= segment.endColumn
+                && y >= segment.y
+                && y < segment.y + segment.height
+        }
+    }
+
     /// 한 주치 배치를 계산한다.
     static func build(
         days: [Date],
