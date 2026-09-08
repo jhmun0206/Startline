@@ -393,20 +393,24 @@ final class CalendarManager {
 
     /// 임의 범위의 일정을 시간순으로 읽어 온다. 그리드 캐시를 건드리지 않는다.
     ///
-    /// 같은 제목·같은 시작시각의 중복 등록분은 한 건으로 줄인다. (명세서 7.2와 같은 기준)
+    /// 여러 캘린더에 중복 등록된 같은 일정은 한 건으로 줄인다. (그리드와 같은 기준)
+    ///
+    /// **같은 캘린더 안의 별개 일정은 줄이지 않는다.** 예전에는 제목·시각만 보고 걸러서
+    /// 같은 이름의 일정 둘 중 하나는 부모로 **고를 수조차 없었다.** (BL-048)
+    /// 그리드와 같은 `groupDuplicates` 를 써서 판정이 어긋나지 않게 한다.
     func fetchEvents(from start: Date, to end: Date) -> [EKEvent] {
         guard accessState == .authorized else { return [] }
 
         let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
 
-        var seen = Set<String>()
-        return eventStore.events(matching: predicate)
+        let visible = eventStore.events(matching: predicate)
             .filter { event in
                 guard let calendar = event.calendar else { return true }
                 return isVisible(calendar)
             }
             .sorted(by: Self.isOrderedChronologically)
-            .filter { seen.insert(DayEvent.groupingKey(for: $0)).inserted }
+
+        return Self.groupDuplicates(visible).map(\.primary)
     }
 
     /// 부모로 고를 수 있는 일정 후보.
@@ -685,23 +689,54 @@ final class CalendarManager {
         return raw.mapValues { Self.groupDuplicates($0.sorted(by: Self.isOrderedBefore)) }
     }
 
-    /// 같은 제목·같은 시작시각의 일정을 한 건으로 묶는다.
+    /// 같은 일정이 **여러 캘린더에** 등록된 경우를 한 건으로 묶는다.
     /// 입력 순서를 유지하므로 정렬된 배열을 넘겨야 한다.
-    nonisolated private static func groupDuplicates(_ events: [EKEvent]) -> [DayEvent] {
+    ///
+    /// **한 묶음에 한 캘린더는 최대 하나만 기여한다.** 이게 핵심 규칙이다.
+    ///
+    /// 예전에는 `종일여부 + 시작시각 + 제목` 만 보고 묶었다. 그러다 보니 사용자가
+    /// 같은 캘린더에 같은 이름·시각으로 만든 **별개의 일정까지** 한 건으로 합쳐졌다.
+    /// 화면에는 하나로 보이는데 실제로는 둘이라, 삭제를 눌러도 대표 일정 하나만
+    /// 지워지고 나머지는 손댈 방법이 없었다. (BL-048)
+    ///
+    /// 묶기의 목적은 공휴일·생일처럼 **여러 캘린더에 중복 등록된 같은 일정**을
+    /// 한 줄로 보여주는 것이지, 사용자가 실제로 만든 일정을 감추는 것이 아니다.
+    ///
+    /// - 「하이루」 2개 (둘 다 직장) → 직장이 이미 찼으므로 **묶음 2개** = 각각 표시
+    /// - 「추석」 2개 (직장 + 개인) → 서로 다른 캘린더이므로 **묶음 1개** = 종전대로
+    nonisolated static func groupDuplicates(_ events: [EKEvent]) -> [DayEvent] {
         var order: [String] = []
-        var groups: [String: [EKEvent]] = [:]
+        var buckets: [String: [[EKEvent]]] = [:]
 
         for event in events {
             let key = DayEvent.groupingKey(for: event)
-            if groups[key] == nil { order.append(key) }
-            groups[key, default: []].append(event)
+            if buckets[key] == nil { order.append(key) }
+
+            let calendarID = event.calendar?.calendarIdentifier
+            var candidates = buckets[key] ?? []
+
+            // 그 캘린더가 아직 안 들어간 묶음을 찾는다. 없으면 새 묶음을 연다.
+            if let index = candidates.firstIndex(where: { bucket in
+                !bucket.contains { $0.calendar?.calendarIdentifier == calendarID }
+            }) {
+                candidates[index].append(event)
+            } else {
+                candidates.append([event])
+            }
+            buckets[key] = candidates
         }
 
-        return order.compactMap { key in
-            guard let group = groups[key], !group.isEmpty else { return nil }
-            // 대표 일정이 매번 같도록 캘린더명으로 정렬한다.
-            let sorted = group.sorted { ($0.calendar?.title ?? "") < ($1.calendar?.title ?? "") }
-            return DayEvent(id: key, events: sorted)
+        return order.flatMap { key -> [DayEvent] in
+            (buckets[key] ?? []).enumerated().compactMap { index, bucket in
+                guard !bucket.isEmpty else { return nil }
+                // 대표 일정이 매번 같도록 캘린더명으로 정렬한다.
+                let sorted = bucket.sorted { ($0.calendar?.title ?? "") < ($1.calendar?.title ?? "") }
+                // 묶음이 갈라졌으므로 키만으로는 더 이상 구별되지 않는다.
+                // 대표 일정의 식별자를 붙인다. 여러 날에 걸친 일정도 날마다 같은 값이 나온다.
+                // 아직 저장되지 않은 일정은 식별자가 없으므로 묶음 순번으로 물러선다.
+                let suffix = sorted[0].eventIdentifier ?? "순번\(index)"
+                return DayEvent(id: "\(key)#\(suffix)", events: sorted)
+            }
         }
     }
 

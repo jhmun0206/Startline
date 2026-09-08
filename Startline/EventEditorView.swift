@@ -22,6 +22,11 @@ struct EventEditorView: View {
     let manager: CalendarManager
     /// 고칠 일정. nil 이면 새로 만든다.
     let event: EKEvent?
+    /// 이 화면이 대표하는 **묶음 전체**. 여러 캘린더에 같은 일정이 등록된 경우 2건 이상이 된다.
+    ///
+    /// 삭제는 묶음 전체가 대상이다. 예전에는 대표 일정 하나만 지워서, 화면에서는
+    /// 사라진 것처럼 보이는데 실제로는 남아 있는 일정이 생겼다. (BL-048)
+    var groupedEvents: [EKEvent] = []
     /// 새로 만들 때의 기준 시작 날짜.
     let defaultDate: Date
     /// 드래그로 고른 기간의 마지막 날. 없으면 하루짜리.
@@ -104,6 +109,12 @@ struct EventEditorView: View {
     }
 
     private var isRecurring: Bool { event?.hasRecurrenceRules == true }
+
+    /// 실제로 지울 일정들. 묶음이 전달되지 않았으면 대표 일정 하나뿐이다.
+    private var deleteTargets: [EKEvent] {
+        guard let event else { return [] }
+        return groupedEvents.isEmpty ? [event] : groupedEvents
+    }
 
     /// 이 일정에 딸린 할 일 개수. 삭제 확인 문구에 쓴다.
     private var attachedTaskCount: Int {
@@ -230,7 +241,7 @@ struct EventEditorView: View {
         } message: {
             Text("반복되는 일정이에요. 이후 회차까지 바꾸면 되돌릴 수 없어요.")
         }
-        .alert("이 일정을 지울까요?", isPresented: $isConfirmingDelete) {
+        .alert(deleteTitle, isPresented: $isConfirmingDelete) {
             if isRecurring {
                 Button("이 일정만", role: .destructive) { delete(span: .thisEvent) }
                 Button("이후 모든 일정", role: .destructive) { delete(span: .futureEvents) }
@@ -559,9 +570,22 @@ struct EventEditorView: View {
         return "\(StartlineFormat.spokenDayTime(start)) ~ \(Self.timeFormatter.string(from: end))"
     }
 
+    private var deleteTitle: String {
+        deleteTargets.count > 1 ? "\(deleteTargets.count)개를 함께 지울까요?" : "이 일정을 지울까요?"
+    }
+
     /// 되돌릴 수 없고 다른 기기까지 번지는 일이라, 무슨 일이 벌어지는지 그대로 적는다.
     private var deleteWarning: String {
         var lines = ["‘\(event?.title ?? "")’를 지우면 되돌릴 수 없어요. 연결된 계정과 다른 기기에서도 사라져요."]
+
+        // 한 줄로 보이지만 실제로는 여러 건인 경우. 몇 개가 어디서 사라지는지 밝힌다.
+        if deleteTargets.count > 1 {
+            let names = deleteTargets
+                .map { $0.calendar?.title ?? "(캘린더 없음)" }
+                .joined(separator: " · ")
+            lines.append("이 줄에는 일정 \(deleteTargets.count)개가 묶여 있어요. \(names) 에서 모두 사라져요.")
+        }
+
         if attachedTaskCount > 0 {
             lines.append("이 일정에 연결된 할 일 \(attachedTaskCount)개는 삭제되지 않고 남습니다.")
         }
@@ -706,10 +730,16 @@ struct EventEditorView: View {
     }
 
     private func delete(span: EKSpan) {
-        guard let event else { return }
+        let targets = deleteTargets
+        guard !targets.isEmpty else { return }
         errorMessage = nil
+
+        // 묶음 전체를 지운다. 하나라도 실패하면 거기서 멈추고 알린다 —
+        // 조용히 넘어가면 화면에서 사라진 것이 실제로는 남는다. (BL-048)
         do {
-            try manager.deleteEvent(event, span: span)
+            for target in targets {
+                try manager.deleteEvent(target, span: span)
+            }
             dismiss()
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

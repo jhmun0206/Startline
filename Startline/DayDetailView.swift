@@ -164,6 +164,8 @@ struct DayDetailView: View {
             EventEditorView(
                 manager: manager,
                 event: dayEvent.primary,
+                // 삭제는 묶음 전체가 대상이다. 대표 하나만 넘기면 나머지가 남는다. (BL-048)
+                groupedEvents: dayEvent.events,
                 defaultDate: manager.selectedDate
             )
         }

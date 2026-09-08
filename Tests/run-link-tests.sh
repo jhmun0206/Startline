@@ -23,6 +23,7 @@ SOURCES=(
   "$ROOT/Startline/CalendarManager.swift"
   "$ROOT/Startline/TaskResolution.swift"
   "$ROOT/Startline/TaskLinkPolicy.swift"
+  "$ROOT/Tests/EventGroupingTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 
@@ -44,7 +45,8 @@ if [ "${1:-}" != "--no-app-build" ]; then
     grep -E "error:" "$WORK/xcodebuild.log" | sort -u | head -20
     exit 2
   fi
-  APP_WARNINGS=$(grep -cE "warning:" "$WORK/xcodebuild.log" || true)
+  # 컴파일 경고만 센다. 툴체인이 뱉는 메시지(AppIntents 등)는 코드와 무관하다.
+  APP_WARNINGS=$(grep -E "\.swift:[0-9]+:[0-9]+: warning:" "$WORK/xcodebuild.log" | sort -u | wc -l | tr -d ' ')
   echo "앱 빌드 성공 (경고 ${APP_WARNINGS}건)"
   echo
 fi
