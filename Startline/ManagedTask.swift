@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import OSLog
 import SwiftData
 
 // MARK: - 열거형
@@ -287,11 +288,30 @@ extension ManagedTask {
 
     // MARK: - 부모 연결 해제 (명세서 4.2)
 
-    /// 부모 일정이 삭제됐을 때 독립 할 일로 전환한다.
+    /// 부모 연결을 끊고 독립 할 일로 전환한다.
     ///
     /// 할 일을 함께 지우지 않는다. 준비 작업 자체는 여전히 유효할 수 있다.
     /// 마지막으로 계산된 실효마감을 확정 마감으로 승격시킨다.
-    func detachFromParent(lastKnownDueAt: Date?) {
+    ///
+    /// **`parentEventID` 를 `nil` 로 만드는 곳은 앱 전체에서 여기 하나뿐이다.**
+    /// 한 번 끊으면 어느 일정에 붙어 있었는지가 함께 사라져 **되돌릴 수 없다.**
+    /// 실제로 이 경로가 멀쩡한 연결을 지운 적이 있다. (BL-045)
+    ///
+    /// 그래서 이유를 인자로 **강제한다.** 「부모를 못 찾음」은 이유가 될 수 없고,
+    /// 새 이유를 들이려면 `TaskLinkPolicy.DetachReason` 에 케이스를 더해야 한다.
+    /// 끊긴 사실은 콘솔에 남아 나중에 추적할 수 있다.
+    func detachFromParent(lastKnownDueAt: Date?, reason: TaskLinkPolicy.DetachReason) {
+        if let parentEventID {
+            TaskLinkPolicy.log.notice(
+                """
+                연결 해제 — 할 일 「\(self.title, privacy: .public)」 \
+                부모 \(parentEventID, privacy: .public) \
+                회차 \(self.parentOccurrenceDate?.description ?? "없음", privacy: .public) \
+                이유 \(reason.rawValue, privacy: .public)
+                """
+            )
+        }
+
         if let lastKnownDueAt { dueAt = lastKnownDueAt }
         parentEventID = nil
         parentOccurrenceDate = nil

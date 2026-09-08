@@ -514,21 +514,30 @@ struct TaskEditorView: View {
     ///
     /// 연결을 끊는 것은 사용자가 **「특정 날짜」를 직접 고른 경우뿐**이다.
     private func apply(to task: ManagedTask) {
-        guard dueMode == .attachedToEvent else {
+        let decision = TaskLinkPolicy.decideOnSave(
+            wantsAttachment: dueMode == .attachedToEvent,
+            resolvedParentID: parentEvent?.eventIdentifier,
+            resolvedParentStart: parentEvent?.startDate,
+            offsetFromParent: offsetFromParent,
+            fixedDueAt: dueAt,
+            effectiveDueAt: effectiveDueAt
+        )
+
+        switch decision {
+        case .detach(let reason):
             // 「특정 날짜」로 되돌린 경우. 부모를 떼고 고른 날짜를 확정 마감으로 삼는다.
-            task.detachFromParent(lastKnownDueAt: dueAt)
-            return
-        }
+            task.detachFromParent(lastKnownDueAt: dueAt, reason: reason)
 
-        guard let parentEvent, let parentEventID = parentEvent.eventIdentifier else {
-            // 부모를 아직 못 찾았다. 저장된 연결은 그대로 두고 마감만 손대지 않는다.
-            return
-        }
+        case .keepStored:
+            // 부모를 아직 못 찾았다. 저장된 연결도 마감도 손대지 않는다.
+            break
 
-        task.parentEventID = parentEventID
-        task.parentOccurrenceDate = parentEvent.startDate
-        task.offsetFromParent = offsetFromParent
-        // 부모가 삭제됐을 때 승격시킬 값을 미리 남겨둔다. (명세서 4.2)
-        task.dueAt = effectiveDueAt
+        case .link(let eventID, let occurrenceDate, let offset, let dueAt):
+            task.parentEventID = eventID
+            task.parentOccurrenceDate = occurrenceDate
+            task.offsetFromParent = offset
+            // 부모가 삭제됐을 때 승격시킬 값을 미리 남겨둔다. (명세서 4.2)
+            task.dueAt = dueAt
+        }
     }
 }
