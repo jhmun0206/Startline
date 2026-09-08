@@ -194,7 +194,7 @@ struct TodayStartSection: View {
         switch state {
         case .remaining(let count): return "오늘 시작할 일이 \(count)개 남았어요"
         case .allDone: return "오늘 할 일을 다 마쳤어요. 수고했어요"
-        case .none: return "오늘 시작할 일이 없어요"
+        case .none: return "오늘 시작할 일이 0개예요"
         }
     }
 

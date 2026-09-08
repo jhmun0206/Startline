@@ -108,9 +108,9 @@ struct DetachedTaskNotice: Identifiable {
 /// (화면 진입, 월 이동, 외부 캘린더 변경 감지) 뷰 본문에서 저장을 일으키지 않기 위해서다.
 enum TaskLinkMaintenance {
 
-    /// 부모 일정이 삭제된 할 일을 독립 할 일로 전환한다.
+    /// 부모 일정 상태를 저장값에 반영한다.
     ///
-    /// 할 일을 함께 지우지 않는다. 마지막으로 계산된 실효마감을 확정 마감으로 승격시킨다.
+    /// **부모를 못 찾아도 연결을 끊지 않는다.** 알리기만 한다. (BL-045)
     /// 부모가 옮겨졌으면 실효마감 사본을 갱신해, 나중에 부모가 삭제될 때 승격시킬 값을 확보한다.
     /// (명세서 4.2)
     ///
@@ -128,11 +128,16 @@ enum TaskLinkMaintenance {
 
         for task in tasks where task.isAttached {
             guard let start = parentStart(task) else {
-                // 부모가 사라졌다. 마지막으로 확정된 마감을 유지한 채 독립 할 일로 전환한다.
-                let confirmed = task.dueAt
-                task.detachFromParent(lastKnownDueAt: confirmed)
+                // 부모를 못 찾았다. **여기서 연결을 끊지 않는다.**
+                //
+                // 조회 실패가 곧 삭제는 아니다. 계정 동기화 중이거나 식별자가 바뀌는 등
+                // 잠깐 못 찾는 경우가 있는데, 그때 연결을 지우면 되돌릴 방법이 없다.
+                // 실제로 이 자동 전환이 멀쩡한 연결을 지운 사례가 나왔다. (BL-045)
+                //
+                // 마감은 마지막으로 확정된 `dueAt` 으로 물러서므로 화면은 정상 동작한다.
+                // 끊을지는 사용자가 「특정 날짜」를 골라 정한다.
                 notices.append(
-                    DetachedTaskNotice(id: task.id, title: task.title, confirmedDueAt: confirmed)
+                    DetachedTaskNotice(id: task.id, title: task.title, confirmedDueAt: task.dueAt)
                 )
                 continue
             }

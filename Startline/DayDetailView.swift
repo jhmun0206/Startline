@@ -187,7 +187,7 @@ struct DayDetailView: View {
                 manager: manager
             )
         }
-        .alert("연결된 일정이 사라졌어요", isPresented: detachedAlertBinding) {
+        .alert("연결된 일정을 찾지 못했어요", isPresented: detachedAlertBinding) {
             Button("확인") { detachedNotices = [] }
         } message: {
             Text(detachedMessage)
@@ -395,7 +395,7 @@ struct DayDetailView: View {
     /// 어떤 할 일이 왜 전환됐는지 밝힌다. 조용히 바뀌면 안 된다. (명세서 4.2)
     private var detachedMessage: String {
         let list = detachedNotices.map(\.summary).joined(separator: "\n")
-        return "\(list)\n\n연결된 일정이 지워졌어요. 할 일은 지우지 않고 마지막 마감 그대로 남겨뒀어요."
+        return "\(list)\n\n연결은 그대로 두고 마지막 마감으로 보여주고 있어요. 일정이 정말 지워졌다면 할 일을 열어 「특정 날짜」로 바꿔주세요."
     }
 
     private var dateTitle: String {

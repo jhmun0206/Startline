@@ -468,16 +468,15 @@ struct TaskEditorView: View {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
-        // 「일정에 맞춰」인데 일정을 안 골랐으면 부모 없이 저장한다.
-        let parent = dueMode == .attachedToEvent ? parentEvent : nil
-
         if let task {
             task.title = trimmed
             // 사용자 입력값을 그대로 저장한다. 배수를 곱하지 않는다. (원칙 1)
             task.estimatedDuration = estimatedDuration
             task.leadTime = currentLeadTime
-            apply(parent: parent, to: task)
+            apply(to: task)
         } else {
+            // 새로 만들 때는 「일정에 맞춰」로 고르고 실제로 일정을 집었을 때만 붙인다.
+            let parent = dueMode == .attachedToEvent ? parentEvent : nil
             let newTask: ManagedTask
             if let parent, let parentEventID = parent.eventIdentifier {
                 newTask = ManagedTask(
@@ -506,15 +505,28 @@ struct TaskEditorView: View {
     }
 
     /// 편집 시 부모 연결 상태를 반영한다.
-    private func apply(parent: EKEvent?, to task: ManagedTask) {
-        guard let parent, let parentEventID = parent.eventIdentifier else {
+    /// 부모 연결을 반영한다.
+    ///
+    /// **부모를 못 찾았다는 이유로 저장된 연결을 지우지 않는다.**
+    /// `load()` 는 `dueMode` 를 「일정에 맞춰」로 두고 부모를 찾아보는데, 그 조회가
+    /// 한 번 실패하면 `parentEvent` 가 비어 있게 된다. 그 상태로 저장을 누르면
+    /// 예전 구현은 연결을 통째로 끊었다 — 사용자는 저장만 눌렀는데 관계가 사라졌다.
+    ///
+    /// 연결을 끊는 것은 사용자가 **「특정 날짜」를 직접 고른 경우뿐**이다.
+    private func apply(to task: ManagedTask) {
+        guard dueMode == .attachedToEvent else {
             // 「특정 날짜」로 되돌린 경우. 부모를 떼고 고른 날짜를 확정 마감으로 삼는다.
             task.detachFromParent(lastKnownDueAt: dueAt)
             return
         }
 
+        guard let parentEvent, let parentEventID = parentEvent.eventIdentifier else {
+            // 부모를 아직 못 찾았다. 저장된 연결은 그대로 두고 마감만 손대지 않는다.
+            return
+        }
+
         task.parentEventID = parentEventID
-        task.parentOccurrenceDate = parent.startDate
+        task.parentOccurrenceDate = parentEvent.startDate
         task.offsetFromParent = offsetFromParent
         // 부모가 삭제됐을 때 승격시킬 값을 미리 남겨둔다. (명세서 4.2)
         task.dueAt = effectiveDueAt
