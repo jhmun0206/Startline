@@ -162,9 +162,7 @@ struct TodayStartSection: View {
                     ForEach(attentionTasks) { resolved in
                         HoverRegion(
                             onSelect: { selection.select(task: resolved, among: tasks) },
-                            onOpen: { onSelect(resolved) },
-                            isHighlighted: selection.isHighlighted(taskID: resolved.id),
-                            isSelected: selection.isSelected(taskID: resolved.id)
+                            onOpen: { onSelect(resolved) }
                         ) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Circle()

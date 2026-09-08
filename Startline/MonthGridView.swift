@@ -197,7 +197,7 @@ struct MonthGridView: View {
         // 바깥 클릭을 닫기용으로 삼키므로, 막대를 누르려면 두 번 눌러야 했다. (BL-023)
         .overlayPreferenceValue(HoverPreviewKey.self) { preview in
             GeometryReader { proxy in
-                if let preview {
+                if FeatureFlags.hoverPreview, let preview {
                     hoverPreviewCard(preview, in: proxy)
                 }
             }
@@ -426,19 +426,16 @@ private struct WeekRow: View {
     private func segmentView(_ segment: GridSegment, metrics: GridMetrics) -> some View {
         switch segment.kind {
         case .event(let dayEvent):
-            let ids = dayEvent.events.compactMap(\.eventIdentifier)
+            let keys = dayEvent.occurrenceKeys
             EventBar(
                 metrics: metrics,
                 dayEvent: dayEvent,
                 isDimmed: !manager.isInDisplayedMonth(days[segment.startColumn]),
                 continuesBefore: segment.continuesBefore,
                 continuesAfter: segment.continuesAfter,
-                isHighlighted: selection.isHighlighted(anyOf: ids),
-                isSelected: selection.isSelected(anyOf: ids),
-                onSelect: {
-                    guard let id = ids.first else { return }
-                    selection.select(eventID: id, among: resolvedTasks)
-                },
+                isHighlighted: selection.isHighlighted(anyOf: keys),
+                isSelected: selection.isSelected(anyOf: keys),
+                onSelect: { selection.select(occurrenceKeys: keys, among: resolvedTasks) },
                 onOpen: { onOpenEvent(dayEvent) }
             )
         case .task(let item):
@@ -502,10 +499,7 @@ private struct DayCellBackground: View {
         .background(background)
         .overlay(alignment: .topLeading) {
             Rectangle()
-                .strokeBorder(
-                    isSelected ? Color.accentColor : Color.secondary.opacity(0.18),
-                    lineWidth: isSelected ? 1.5 : 0.5
-                )
+                .strokeBorder(borderColor, lineWidth: isSelected ? 1.5 : 0.5)
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: onAdd)
@@ -514,11 +508,16 @@ private struct DayCellBackground: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    /// 선택된 칸을 파랗게 채우지 않는다. 그 안의 막대가 묻힌다.
+    /// 「이 날짜가 우측 패널에 보이고 있다」만 전하면 충분하다.
     private var background: Color {
         // 범위 표시는 임시 막대가 맡는다. 칸은 영역만 알 수 있을 만큼만 물들인다.
         if isInDraftRange { return Color.accentColor.opacity(0.06) }
-        if isSelected { return Color.accentColor.opacity(0.12) }
         return .clear
+    }
+
+    private var borderColor: Color {
+        isSelected ? Color.primary.opacity(0.45) : Color.secondary.opacity(0.18)
     }
 
     private var numberColor: Color {
@@ -610,11 +609,13 @@ private struct EventBar: View {
             cancelHover()
             onOpen()
         }
-        .onTapGesture {
+        // 고르기는 두 번 클릭 판정을 기다리지 않고 곧바로 반응한다.
+        .simultaneousGesture(TapGesture().onEnded {
             cancelHover()
             onSelect()
-        }
+        })
         .onHover { hovering in
+            guard FeatureFlags.hoverPreview else { return }
             if hovering {
                 hoverDelay?.cancel()
                 hoverDelay = Task {
@@ -734,11 +735,13 @@ private struct TaskBar: View {
             cancelHover()
             onOpen()
         }
-        .onTapGesture {
+        // 고르기는 두 번 클릭 판정을 기다리지 않고 곧바로 반응한다.
+        .simultaneousGesture(TapGesture().onEnded {
             cancelHover()
             onSelect()
-        }
+        })
         .onHover { hovering in
+            guard FeatureFlags.hoverPreview else { return }
             if hovering {
                 hoverDelay?.cancel()
                 hoverDelay = Task {

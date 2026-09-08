@@ -21,6 +21,15 @@ nonisolated struct ResolvedTask: Identifiable {
     let judgment: StartJudgment?
     /// 부모 일정 제목. 독립 할 일이면 `nil`.
     let parentTitle: String?
+    /// 찾아낸 부모 일정의 시작시각. 반복 일정에서 회차를 가르는 데 쓴다.
+    var parentStart: Date?
+
+    /// 부모 일정의 **회차**를 특정하는 키.
+    /// 반복 일정은 회차마다 다르므로, 같은 일정의 다른 회차와 섞이지 않는다.
+    var parentOccurrenceKey: String? {
+        guard let parentEventID = task.parentEventID, let parentStart else { return nil }
+        return DayEvent.occurrenceKey(eventID: parentEventID, start: parentStart)
+    }
 
     var id: UUID { task.id }
     var isAttached: Bool { task.isAttached }
@@ -61,7 +70,8 @@ struct TaskResolver {
                 now: now,
                 calendar: manager.calendar
             ),
-            parentTitle: parent?.title
+            parentTitle: parent?.title,
+            parentStart: parent?.startDate
         )
     }
 

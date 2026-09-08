@@ -248,15 +248,13 @@ struct DayDetailView: View {
     private func eventCard(_ dayEvent: DayEvent) -> some View {
         let attached = attachedTasks(for: dayEvent)
 
-        let ids = dayEvent.events.compactMap(\.eventIdentifier)
+        let keys = dayEvent.occurrenceKeys
 
         if attached.isEmpty {
             PanelCard(inset: CardMetrics.borderGap) {
                 HoverRegion(
-                    onSelect: { selectEvent(ids) },
-                    onOpen: { eventToOpen = dayEvent },
-                    isHighlighted: selection.isHighlighted(anyOf: ids),
-                    isSelected: selection.isSelected(anyOf: ids)
+                    onSelect: { selectEvent(keys) },
+                    onOpen: { eventToOpen = dayEvent }
                 ) {
                     EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                 }
@@ -268,10 +266,8 @@ struct DayDetailView: View {
                 // 간격은 위아래 영역의 여백으로 흡수시킨다.
                 VStack(alignment: .leading, spacing: 0) {
                     HoverRegion(
-                        onSelect: { selectEvent(ids) },
-                        onOpen: { eventToOpen = dayEvent },
-                        isHighlighted: selection.isHighlighted(anyOf: ids),
-                        isSelected: selection.isSelected(anyOf: ids)
+                        onSelect: { selectEvent(keys) },
+                        onOpen: { eventToOpen = dayEvent }
                     ) {
                         EventRow(dayEvent: dayEvent, day: manager.selectedDate)
                     }
@@ -280,9 +276,7 @@ struct DayDetailView: View {
                         ForEach(attached) { resolved in
                             HoverRegion(
                                 onSelect: { selection.select(task: resolved, among: resolvedTasks) },
-                                onOpen: { editingTask = resolved.task },
-                                isHighlighted: selection.isHighlighted(taskID: resolved.id),
-                                isSelected: selection.isSelected(taskID: resolved.id)
+                                onOpen: { editingTask = resolved.task }
                             ) {
                                 TaskRow(
                                     resolved: resolved,
@@ -321,9 +315,7 @@ struct DayDetailView: View {
                 PanelCard(inset: CardMetrics.borderGap) {
                     HoverRegion(
                         onSelect: { selection.select(task: resolved, among: resolvedTasks) },
-                        onOpen: { editingTask = resolved.task },
-                        isHighlighted: selection.isHighlighted(taskID: resolved.id),
-                        isSelected: selection.isSelected(taskID: resolved.id)
+                        onOpen: { editingTask = resolved.task }
                     ) {
                         TaskRow(
                             resolved: resolved,
@@ -394,9 +386,10 @@ struct DayDetailView: View {
         manager.selectedDate = manager.calendar.startOfDay(for: due)
     }
 
-    private func selectEvent(_ ids: [String]) {
-        guard let id = ids.first else { return }
-        selection.select(eventID: id, among: resolvedTasks)
+    /// 우측 패널은 이미 고른 날짜만 보여주는 좁은 범위라 여기서는 강조하지 않는다.
+    /// 고르기는 그리드 강조로 드러난다.
+    private func selectEvent(_ occurrenceKeys: [String]) {
+        selection.select(occurrenceKeys: occurrenceKeys, among: resolvedTasks)
     }
 
     private func delete(_ resolved: ResolvedTask) {

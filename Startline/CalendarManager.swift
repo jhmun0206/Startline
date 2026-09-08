@@ -60,6 +60,21 @@ nonisolated struct DayEvent: Identifiable {
         }
     }
 
+    /// 이 막대가 가리키는 **회차**들의 키.
+    ///
+    /// 반복 일정은 회차가 달라도 `eventIdentifier` 가 같다. 식별자만으로 판정하면
+    /// 한 회차를 골랐을 때 모든 회차가 함께 걸린다. 시작시각을 붙여 회차를 가른다.
+    var occurrenceKeys: [String] {
+        events.compactMap { event in
+            guard let id = event.eventIdentifier, let start = event.startDate else { return nil }
+            return DayEvent.occurrenceKey(eventID: id, start: start)
+        }
+    }
+
+    nonisolated static func occurrenceKey(eventID: String, start: Date) -> String {
+        "\(eventID)|\(start.timeIntervalSinceReferenceDate)"
+    }
+
     /// 중복 판정 키. 상태를 읽지 않으므로 액터 격리에서 벗어나 있다.
     nonisolated static func groupingKey(for event: EKEvent) -> String {
         let start = event.startDate?.timeIntervalSinceReferenceDate ?? 0
