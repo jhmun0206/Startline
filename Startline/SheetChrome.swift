@@ -39,22 +39,30 @@ struct SheetHeader: View {
     @State private var isConfirmingClose = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if let backTitle, let onBack {
-                Button(action: onBack) {
-                    Label(backTitle, systemImage: "chevron.left")
+        // 되돌아가기 링크와 제목은 **글자끼리** 밑선을 맞추고, X 버튼은 그 덩어리의
+        // **가운데**에 맞춘다. 제목이 커진 뒤 baseline 으로 함께 묶으면 이미지인 X 가
+        // 제목 밑선까지 내려가 어긋난다.
+        HStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let backTitle, let onBack {
+                    Button(action: onBack) {
+                        Label(backTitle, systemImage: "chevron.left")
+                            .font(.subheadline)
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.link)
+                    Text("·")
                         .font(.subheadline)
-                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.link)
-                Text("·")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+
+                // 시트의 머리글이다. 본문 입력란(.title3)보다 작으면 머리글로 읽히지 않는다.
+                // 크기는 입력란과 같게 두고 굵기로 구분한다. .bold 는 과하다.
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
 
-            Text(title)
-                .font(.subheadline.bold())
-                .foregroundStyle(.secondary)
             Spacer()
             CloseButton {
                 if hasUnsavedInput {
