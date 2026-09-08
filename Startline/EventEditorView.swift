@@ -66,15 +66,11 @@ struct EventEditorView: View {
         let task: ManagedTask
         var title: String
         var daysBefore: Int
-        /// 완료 여부. 다른 값과 마찬가지로 **저장을 눌러야** 반영된다.
-        /// 이 시트에서 「그만두기」를 누르면 체크도 함께 없던 일이 되어야 한다.
-        var isDone: Bool
         let originalTitle: String
         let originalDaysBefore: Int
-        let originalIsDone: Bool
 
         var isChanged: Bool {
-            title != originalTitle || daysBefore != originalDaysBefore || isDone != originalIsDone
+            title != originalTitle || daysBefore != originalDaysBefore
         }
     }
 
@@ -514,10 +510,8 @@ struct EventEditorView: View {
                 task: task,
                 title: task.title,
                 daysBefore: days,
-                isDone: task.status == .done,
                 originalTitle: task.title,
-                originalDaysBefore: days,
-                originalIsDone: task.status == .done
+                originalDaysBefore: days
             )
         }
     }
@@ -539,10 +533,6 @@ struct EventEditorView: View {
             let offset = -TimeInterval(edit.daysBefore) * dayLength
             edit.task.offsetFromParent = offset
             edit.task.dueAt = eventStart.addingTimeInterval(offset)
-
-            if edit.isDone != edit.originalIsDone {
-                if edit.isDone { edit.task.markDone() } else { edit.task.markNotStarted() }
-            }
         }
     }
 
@@ -789,16 +779,19 @@ struct EventEditorView: View {
 /// 기준을 맞추기 위해서다. 그만두면 아무것도 남지 않는다. (BL-037)
 /// 일정에 딸린 할 일 한 줄.
 ///
-/// **행을 세 섹션으로 나눈다. 「밝아지는 곳 = 눌리는 곳」.**
+/// **행을 두 섹션으로 나눈다. 「밝아지는 곳 = 눌리는 곳」.**
 ///
-///     ┌─────┬──────────────────────────────┬─────┐
-///     │  ○  │  졸프 주제 선정하기  1일 전까지 │  ⊖  │
-///     └─────┴──────────────────────────────┴─────┘
-///       체크        본문 (누르면 상세 편집)      삭제
+///     ┌──────────────────────────────────┬─────┐
+///     │  졸프 주제 선정하기      1일 전까지 │  ⊖  │
+///     └──────────────────────────────────┴─────┘
+///           본문 (누르면 상세 편집)          삭제
 ///
 /// 예전에는 한 줄에 체크·제목칸·스테퍼·`›`·⊖ 가 모두 있었다. `›` 는 "누르면 들어간다"는
 /// 안내일 뿐 그 자체로 하는 일이 없었고, 스테퍼는 상세 편집과 기능이 겹쳤다.
 /// 어디를 눌러야 무엇이 되는지도 알 수 없었다.
+///
+/// **완료 체크는 두지 않는다.** 여기는 일정을 편집하러 들어온 화면이고,
+/// 할 일 완료는 우측 패널에서 하는 행위다. 완료 여부는 취소선으로 보여주기만 한다.
 ///
 /// **스테퍼를 뺀 이유** — 같은 값을 두 경로에서 고칠 수 있으면 어느 쪽이 기준인지
 /// 모호해진다. 상세 편집에서 더 편하게 조정할 수 있으므로 중복이다. 스테퍼를
@@ -809,23 +802,19 @@ private struct AttachedTaskRow: View {
     let onOpen: () -> Void
     let onRemove: () -> Void
 
+    /// 완료 여부는 **보여주기만** 한다. 여기서 완료 처리하지 않는다.
+    /// 완료 체크는 우측 패널에서 하는 행위다.
+    private var isDone: Bool { edit.task.status == .done }
+
     var body: some View {
         HStack(spacing: 0) {
-            // 좌측 — 완료 토글만 담당한다. 여기를 눌러도 시트는 열리지 않는다.
-            RowSection(action: { edit.isDone.toggle() },
-                       help: edit.isDone ? "완료 취소" : "완료로 표시") {
-                Image(systemName: edit.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(edit.isDone ? Color.accentColor : .secondary)
-            }
-
-            // 가운데 — 본문. 읽기 전용이며 누르면 상세 편집으로 넘어간다.
+            // 좌측 — 본문. 읽기 전용이며 누르면 상세 편집으로 넘어간다.
             RowSection(action: onOpen, help: "소요시간 등 자세히 고치기", expands: true) {
                 HStack(spacing: 8) {
                     Text(edit.title.isEmpty ? "제목 없음" : edit.title)
                         .font(.callout)
-                        .strikethrough(edit.isDone)
-                        .foregroundStyle(edit.isDone ? .secondary : .primary)
+                        .strikethrough(isDone)
+                        .foregroundStyle(isDone ? .secondary : .primary)
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
