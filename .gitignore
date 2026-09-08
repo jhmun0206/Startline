@@ -51,3 +51,6 @@ fastlane/test_output
 
 # 기타
 *.log
+
+# 컴파일 부스러기
+*.swiftdeps
