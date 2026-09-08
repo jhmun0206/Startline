@@ -39,6 +39,8 @@ struct EventEditorView: View {
 
     @State private var errorMessage: String?
     @State private var isConfirmingDelete = false
+    /// 반복 일정을 고칠 때 적용 범위를 묻는 중.
+    @State private var isConfirmingRecurringSave = false
 
     /// 같은 시트 안에서 세부 편집으로 들어간 할 일. 값이 있으면 할 일 폼이 뜬다.
     @State private var editingLinkedTask: ManagedTask?
@@ -221,6 +223,13 @@ struct EventEditorView: View {
             Divider()
             footer
         }
+        .alert("어디까지 바꿀까요?", isPresented: $isConfirmingRecurringSave) {
+            Button("이 일정만") { performSave(span: .thisEvent) }
+            Button("이후 모든 일정") { performSave(span: .futureEvents) }
+            Button("그만두기", role: .cancel) {}
+        } message: {
+            Text("반복되는 일정이에요. 이후 회차까지 바꾸면 되돌릴 수 없어요.")
+        }
         .alert("이 일정을 지울까요?", isPresented: $isConfirmingDelete) {
             if isRecurring {
                 Button("이 일정만", role: .destructive) { delete(span: .thisEvent) }
@@ -295,7 +304,7 @@ struct EventEditorView: View {
     }
 
     private var recurringNote: some View {
-        Label("반복되는 일정이에요. 고치면 이 회차만 바뀌어요.", systemImage: "repeat")
+        Label("반복되는 일정이에요. 저장할 때 어디까지 바꿀지 고릅니다.", systemImage: "repeat")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
@@ -618,6 +627,15 @@ struct EventEditorView: View {
     }
 
     private func save() {
+        // 반복 일정을 고칠 때는 삭제와 같은 수준으로 범위를 묻는다. (BL-024)
+        if isEditing, isRecurring {
+            isConfirmingRecurringSave = true
+            return
+        }
+        performSave(span: .thisEvent)
+    }
+
+    private func performSave(span: EKSpan) {
         errorMessage = nil
 
         guard let targetCalendar = manager.writableCalendars.first(
@@ -638,7 +656,7 @@ struct EventEditorView: View {
                     start: range.start,
                     end: range.end,
                     isAllDay: isAllDay,
-                    span: .thisEvent
+                    span: span
                 )
                 applyLinkedEdits(eventStart: range.start)
                 createDraftTasks(for: event, eventStart: range.start)

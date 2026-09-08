@@ -498,8 +498,9 @@ private struct DayCellBackground: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(background)
         .overlay(alignment: .topLeading) {
+            // 칸을 가르는 선. 선택 여부와 무관하게 늘 같다.
             Rectangle()
-                .strokeBorder(borderColor, lineWidth: isSelected ? 1.5 : 0.5)
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: onAdd)
@@ -508,16 +509,16 @@ private struct DayCellBackground: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// 선택된 칸을 파랗게 채우지 않는다. 그 안의 막대가 묻힌다.
-    /// 「이 날짜가 우측 패널에 보이고 있다」만 전하면 충분하다.
+    /// 선택 표시는 **배경**으로 한다.
+    ///
+    /// 테두리로 두르면 여러 날에 걸친 막대를 가로질러 잘라 놓는다.
+    /// 배경은 막대 뒤에 깔리므로 아무것도 가로지르지 않는다.
+    /// 「이 날짜가 우측 패널에 보이고 있다」만 전하면 되므로 아주 옅게 둔다.
     private var background: Color {
         // 범위 표시는 임시 막대가 맡는다. 칸은 영역만 알 수 있을 만큼만 물들인다.
         if isInDraftRange { return Color.accentColor.opacity(0.06) }
+        if isSelected { return Color.primary.opacity(0.05) }
         return .clear
-    }
-
-    private var borderColor: Color {
-        isSelected ? Color.primary.opacity(0.45) : Color.secondary.opacity(0.18)
     }
 
     private var numberColor: Color {

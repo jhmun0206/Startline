@@ -125,12 +125,8 @@ struct DayDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 1계층 「오늘 시작」 — 최상단 고정. 0개면 블록 자체가 사라진다. (명세서 5.2)
-            TodayStartSection(
-                tasks: resolvedTasks,
-                selection: selection
-            ) { resolved in
-                jump(to: resolved)
-            }
+            // 늘 같은 높이라 아래 시작 위치가 흔들리지 않는다.
+            TodayStartSection(tasks: resolvedTasks, now: now)
 
             header
 
@@ -376,14 +372,6 @@ struct DayDetailView: View {
         // 부모 이동에 따른 마감 갱신과 독립 전환도 즉시 디스크에 쓴다.
         saver.commit(modelContext)
         if !detached.isEmpty { detachedNotices = detached }
-    }
-
-    private func jump(to resolved: ResolvedTask) {
-        guard let due = resolved.effectiveDueAt else { return }
-        if !manager.isInDisplayedMonth(due) {
-            manager.setDisplayedMonth(due)
-        }
-        manager.selectedDate = manager.calendar.startOfDay(for: due)
     }
 
     /// 우측 패널은 이미 고른 날짜만 보여주는 좁은 범위라 여기서는 강조하지 않는다.

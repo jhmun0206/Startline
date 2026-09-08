@@ -128,61 +128,89 @@ struct EmptyNote: View {
 // MARK: - 오늘 시작
 
 /// 명세서 5.2 1계층 — 우측 패널 최상단 고정.
-/// 사용자가 이미 아는 오늘 일정보다, 모르고 있는 항목이 위에 와야 한다.
-/// **항목이 0개면 이 블록 자체가 사라진다.**
+///
+/// **항상 같은 높이의 한 줄이다.** 목록을 늘어놓으면 항목을 완료하거나 날짜를 옮길 때마다
+/// 블록 높이가 변해 아래 「일정」·「할 일」 섹션이 통째로 밀린다.
+/// 어떤 할 일인지는 아래 「할 일」 섹션에 이미 있으므로 여기서는 **개수만** 알린다.
+///
+/// 오늘 날짜 기준이다. 고른 날짜와 무관하게 늘 오늘을 말한다.
 struct TodayStartSection: View {
     let tasks: [ResolvedTask]
-    let selection: GridSelection
-    let onSelect: (ResolvedTask) -> Void
+    let now: Date
 
-    /// 오늘이 착수마감인 항목 + 착수마감이 지났는데 미시작인 항목.
-    private var attentionTasks: [ResolvedTask] {
-        tasks
-            .filter(\.needsStartAttention)
-            .sorted { lhs, rhs in
-                let l = lhs.startDeadline ?? .distantFuture
-                let r = rhs.startDeadline ?? .distantFuture
-                if l != r { return l < r }
-                return lhs.task.title < rhs.task.title
-            }
+    /// 세 경우 모두 같은 높이여야 아래가 흔들리지 않는다.
+    private static let lineHeight: CGFloat = 22
+
+    private var calendar: Calendar { .current }
+
+    /// 오늘 시작해야 하는 일. 완료한 것도 「원래 있었는지」를 세기 위해 포함한다.
+    private var todaysTasks: [ResolvedTask] {
+        tasks.filter { resolved in
+            guard let startDeadline = resolved.startDeadline else { return false }
+            if calendar.isDate(startDeadline, inSameDayAs: now) { return true }
+            // 시작 시점을 놓친 채 아직 손대지 않은 것도 오늘 몫이다.
+            return resolved.task.status == .notStarted && startDeadline < now
+        }
+    }
+
+    private var remainingCount: Int {
+        todaysTasks.filter { $0.task.status != .done }.count
+    }
+
+    private enum State {
+        case remaining(Int)
+        case allDone
+        case none
+    }
+
+    private var state: State {
+        if remainingCount > 0 { return .remaining(remainingCount) }
+        // 원래 있었는데 전부 체크한 경우에만 마쳤다고 말한다.
+        return todaysTasks.isEmpty ? .none : .allDone
     }
 
     var body: some View {
-        if !attentionTasks.isEmpty {
-            PanelCard(tint: Color.orange.opacity(0.10), inset: CardMetrics.borderGap) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("오늘 시작", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange)
-                        // 아래 항목들과 왼쪽 끝을 맞춘다.
-                        .padding(.horizontal, CardMetrics.regionInset)
-
-                    // 배지를 달지 않는다. 블록 제목이 이미 "오늘 시작"이라는 뜻을 담고 있고,
-                    // 같은 항목이 아래 목록에도 나타나므로 양쪽에 배지가 있으면 시선이 흩어진다.
-                    ForEach(attentionTasks) { resolved in
-                        HoverRegion(
-                            onSelect: { selection.select(task: resolved, among: tasks) },
-                            onOpen: { onSelect(resolved) }
-                        ) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Circle()
-                                    .fill(.orange)
-                                    .frame(width: 5, height: 5)
-                                Text(resolved.contextualTitle)
-                                    .font(.callout)
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                            }
-                        }
-                    }
-                }
+        PanelCard(tint: tint.opacity(0.10), inset: CardMetrics.borderGap) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.caption.bold())
+                Text(message)
+                    .font(.callout)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
-            )
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
+            .foregroundStyle(tint)
+            // 아이콘과 글자를 세로 가운데에 두고 위아래 여백을 같게 한다.
+            .frame(height: Self.lineHeight)
+            .padding(.horizontal, CardMetrics.regionInset)
+            .padding(.vertical, CardMetrics.regionInset)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .animation(.easeOut(duration: 0.15), value: remainingCount)
+    }
+
+    private var message: String {
+        switch state {
+        case .remaining(let count): return "오늘 시작할 일이 \(count)개 남았어요"
+        case .allDone: return "오늘 할 일을 다 마쳤어요. 수고했어요"
+        case .none: return "오늘 시작할 일이 없어요"
+        }
+    }
+
+    private var symbol: String {
+        switch state {
+        case .remaining: return "exclamationmark.triangle.fill"
+        case .allDone: return "checkmark.circle.fill"
+        case .none: return "calendar"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .remaining: return .orange
+        case .allDone: return .green
+        case .none: return .secondary
         }
     }
 }
