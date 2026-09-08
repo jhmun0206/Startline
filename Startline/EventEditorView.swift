@@ -685,7 +685,7 @@ struct EventEditorView: View {
                 applyLinkedEdits(eventStart: range.start)
                 createDraftTasks(for: event, eventStart: range.start)
                 saver.commit(modelContext)
-                dismiss()
+                finishWithoutShaking()
             } else {
                 let created = try manager.createEvent(
                     title: title,
@@ -695,11 +695,28 @@ struct EventEditorView: View {
                     isAllDay: isAllDay
                 )
                 createDraftTasks(for: created, eventStart: range.start)
-                dismiss()
+                finishWithoutShaking()
             }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    /// 저장을 마치고 시트를 닫는다.
+    ///
+    /// **임시 막대를 여기서 지운다.** `onDisappear` 에 맡기면 안 된다.
+    ///
+    /// 일정을 만들면 그리드가 곧바로 다시 그려지는데, 그 시점에 임시 막대가 아직
+    /// 살아 있으면 막대가 **2개**(임시 + 실제)가 되어 행이 늘어난다. 그러고 나서
+    /// 시트가 닫히며 `onDisappear` 가 임시 막대를 지우면 행이 다시 줄어든다.
+    /// 그리드가 위아래로 두 번 흔들리는 이유가 이것이다.
+    ///
+    /// 지우기와 만들기를 **같은 동기 블록**에 두면 한 번의 갱신으로 합쳐진다.
+    /// 임시 막대는 이미 실제 일정과 같은 레인 규칙을 따르므로(`GridLayout`)
+    /// 레인 수가 그대로여서 높이가 변하지 않는다.
+    private func finishWithoutShaking() {
+        draft.clear()
+        dismiss()
     }
 
     /// 폼에 적어둔 할 일들을 이 일정에 딸린 할 일로 만든다.
