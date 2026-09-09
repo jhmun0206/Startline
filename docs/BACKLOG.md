@@ -491,7 +491,7 @@ startPage = (24 / 700).rounded() = 0    → months[0]
   레인을 먹어 BL-034 를 악화시키고, 막대 길이가 뜻하는 「착수마감~실효마감」과 어긋난다.
 
   회귀 테스트 31건 추가. ([Tests/GridTaskPlacementTests.swift](../Tests/GridTaskPlacementTests.swift))
-- **커밋:** (아래 해시)
+- **커밋:** `eb1bc4e`
 - **관련:** `0dd8a36`(부분 수정), BL-027
 - **등록일:** 2026-09-09
 
