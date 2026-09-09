@@ -620,6 +620,7 @@ enum LinkIntegrityTests {
                 testRepeatedSync()
                 testEdgeCases()
                 testEventGrouping()
+                testGridTaskPlacement()
                 exit(report.finish())
             }
         } catch {

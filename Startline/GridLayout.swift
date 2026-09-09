@@ -122,6 +122,20 @@ nonisolated enum GridTaskPlacement {
         let rangeEnd = calendar.startOfDay(for: gridEnd)
         let today = calendar.startOfDay(for: now)
 
+        // 오늘이 놓인 **주 행**의 처음과 끝. 오늘이 표시 범위 밖이면 `nil`.
+        //
+        // 그리드는 첫 날부터 7일씩 끊어 한 줄을 만든다. (`MonthGridView` 의 `chunked(into: 7)`)
+        // 달력의 주 번호가 아니라 **화면에 그려진 줄**을 기준으로 삼아야
+        // 「같은 줄에 보이는가」와 판정이 어긋나지 않는다.
+        let todayRow: ClosedRange<Date>? = {
+            guard today >= rangeStart, today <= rangeEnd else { return nil }
+            let offset = calendar.dateComponents([.day], from: rangeStart, to: today).day ?? 0
+            guard let rowStart = calendar.date(byAdding: .day, value: (offset / 7) * 7, to: rangeStart),
+                  let rowEnd = calendar.date(byAdding: .day, value: 6, to: rowStart)
+            else { return nil }
+            return rowStart...rowEnd
+        }()
+
         var items: [GridTaskItem] = []
 
         for resolved in tasks {
@@ -141,16 +155,27 @@ nonisolated enum GridTaskPlacement {
 
             // 시작 시점이 지났는데 아직 시작하지 않았으면 오늘 칸에도 띄운다 — 놓치면 안 되므로.
             //
-            // **본 막대가 이미 오늘을 덮고 있으면 띄우지 않는다.**
-            // 착수일부터 마감일까지 뻗는 막대가 오늘을 지나가는데 오늘 칸에 또 그리면,
-            // 같은 할 일이 한 줄로 이어진 막대와 별개 막대로 두 번 보인다.
-            let spanCoversToday = start <= today && today <= end
+            // **본 막대가 오늘과 같은 주 행에 이미 보이면 띄우지 않는다.**
+            //
+            // 메아리의 목적은 「놓치면 안 되니 오늘 칸에도 보이게」다. 본 막대가 같은 줄에
+            // 이미 있으면 그 목적은 달성돼 있고, 메아리는 중복일 뿐이다.
+            //
+            // 예전에는 `start <= today && today <= end` 로, **오늘이 막대 안에 있을 때만**
+            // 걸렀다. 마감이 이미 지나 오늘이 막대 **뒤**에 있으면 걸러지지 않아,
+            // 바로 옆 칸에 메아리가 붙어 하나의 막대가 끊어진 것처럼 보였다. (BL-050)
+            // 오늘이 막대 안인지 뒤인지는 메아리의 목적과 무관한 구분이었다.
+            //
+            // 새 조건은 옛 조건을 포함한다 — 오늘이 막대 안에 있으면 그 막대는 반드시
+            // 오늘의 주 행에 걸치므로, `0dd8a36` 이 없앤 증상도 그대로 막힌다.
+            let mainBarShowsInTodayRow = todayRow.map { row in
+                start <= row.upperBound && end >= row.lowerBound
+            } ?? false
 
             if resolved.task.status == .notStarted,
                let startDeadline = resolved.startDeadline,
                startDeadline < now,
-               !spanCoversToday,
-               today >= rangeStart, today <= rangeEnd {
+               !mainBarShowsInTodayRow,
+               todayRow != nil {
                 items.append(
                     GridTaskItem(resolved: resolved, startDay: today, endDay: today, isEcho: true)
                 )
