@@ -878,13 +878,17 @@ private struct MonthHeaderView: View {
             // 변해도 따라온다.
             Spacer(minLength: 12)
 
-            HStack(spacing: 2) {
-                Button { manager.goToPreviousMonth() } label: { Image(systemName: "chevron.left") }
-                    .help("이전 달")
-                Button { manager.goToNextMonth() } label: { Image(systemName: "chevron.right") }
-                    .help("다음 달")
+            // 두 글리프가 붙어 있어 옆 것을 누르기 쉬웠다. 판정 영역이 서로 닿기만 하고
+            // 겹치지는 않도록 spacing 0 으로 둔다. HStack 은 순서대로 배치하므로
+            // 영역이 겹칠 수 없다.
+            HStack(spacing: 0) {
+                HeaderIconButton(help: "이전 달") { manager.goToPreviousMonth() } label: {
+                    Image(systemName: "chevron.left")
+                }
+                HeaderIconButton(help: "다음 달") { manager.goToNextMonth() } label: {
+                    Image(systemName: "chevron.right")
+                }
             }
-            .buttonStyle(.borderless)
 
             Button {
                 manager.goToToday()
@@ -903,48 +907,49 @@ private struct MonthHeaderView: View {
                     )
             }
             .buttonStyle(.plain)
-            .padding(.leading, 22)
+            // 28pt 판정 영역이 글리프 좌우로 9pt 씩 여백을 만든다.
+            // 눈에 보이는 간격을 종전 22pt 그대로 두려고 그만큼 뺐다.
+            .padding(.leading, 13)
 
-            Button {
-                isShowingCalendarList.toggle()
-            } label: {
-                Image(systemName: hasFilters
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease.circle")
+            HStack(spacing: 0) {
+                HeaderIconButton(help: "보여줄 것 고르기") {
+                    isShowingCalendarList.toggle()
+                } label: {
+                    Image(systemName: hasFilters
+                          ? "line.3.horizontal.decrease.circle.fill"
+                          : "line.3.horizontal.decrease.circle")
+                }
+                .popover(isPresented: $isShowingCalendarList, arrowEdge: .bottom) {
+                    CalendarFilterList(manager: manager)
+                }
+
+                HeaderIconButton(help: "알림 상태") {
+                    isShowingNotifications.toggle()
+                } label: {
+                    Image(systemName: notificationIcon)
+                }
+                .popover(isPresented: $isShowingNotifications, arrowEdge: .bottom) {
+                    NotificationStatusView(scheduler: scheduler)
+                }
+
+                HeaderIconButton(help: "다시 불러오기") {
+                    manager.loadCalendarsAndEvents()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
             }
-            .buttonStyle(.borderless)
-            .help("보여줄 것 고르기")
             // 앞쪽 「‹ › 오늘」은 탐색, 여기부터는 도구·상태다. 성격이 달라 간격으로 가른다.
             // 붙여 두면 컨트롤 여섯 개가 한 덩어리로 뭉쳐 오히려 읽기 어려워진다.
             // 구분선은 쓰지 않는다 — 헤더에 선이 하나 더 생기면 그리드와 경쟁한다.
-            .padding(.leading, 24)
-            .popover(isPresented: $isShowingCalendarList, arrowEdge: .bottom) {
-                CalendarFilterList(manager: manager)
-            }
-
-            Button {
-                isShowingNotifications.toggle()
-            } label: {
-                Image(systemName: notificationIcon)
-            }
-            .buttonStyle(.borderless)
-            .help("알림 상태")
-            .padding(.leading, 10)
-            .popover(isPresented: $isShowingNotifications, arrowEdge: .bottom) {
-                NotificationStatusView(scheduler: scheduler)
-            }
-
-            Button {
-                manager.loadCalendarsAndEvents()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .help("다시 불러오기")
-            .padding(.leading, 10)
+            //
+            // 24 가 아니라 17.5 인 것은 판정 영역이 만든 6.5pt 여백을 뺀 값이기 때문이다.
+            // 눈에 보이는 간격은 종전과 같은 24pt 다.
+            .padding(.leading, 17.5)
         }
         .padding(.horizontal, GridInsets.horizontal)
-        .padding(.vertical, 12)
+        // 12 에서 9 로 줄였다. 버튼이 28pt 로 커진 만큼을 여기서 상쇄해
+        // **헤더 전체 높이를 46pt 그대로** 둔다. (종전 내용 22pt + 12*2)
+        .padding(.vertical, 9)
     }
 
     /// 가장 긴 월 이름이 들어가는 폭.
@@ -973,6 +978,61 @@ private struct MonthHeaderView: View {
         formatter.dateFormat = "yyyy년 M월"
         return formatter
     }()
+}
+
+/// 헤더의 아이콘 버튼.
+///
+/// **누르는 자리를 28×28pt 로 넓힌다.** 배경 없는 글리프는 판정 영역이 글자 크기
+/// 그대로라, `chevron.left` 는 10×14pt 밖에 안 됐다. macOS 권장 최소치의 18% 다.
+/// 둘이 붙어 있으니 옆 것을 누르기도 쉬웠다.
+///
+/// **`frame` 만으로는 안 된다.** 넓힌 자리의 투명한 부분은 클릭을 받지 않는다.
+/// `contentShape` 를 함께 걸어야 그 넓이가 실제 판정 영역이 된다.
+///
+/// 평소 모습은 종전과 똑같다. 배경은 **마우스를 올렸을 때만** 나타난다.
+/// Finder 툴바·Safari 뒤로가기와 같은 방식이다.
+private struct HeaderIconButton<Label: View>: View {
+    let help: String
+    let action: () -> Void
+    @ViewBuilder var label: Label
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) { label }
+            .buttonStyle(HeaderIconButtonStyle(isHovering: isHovering))
+            .onHover { isHovering = $0 }
+            .help(help)
+    }
+}
+
+private struct HeaderIconButtonStyle: ButtonStyle {
+    /// macOS 권장 최소 클릭 대상.
+    static var hitSize: CGFloat { 28 }
+
+    let isHovering: Bool
+
+    /// 비활성 버튼에 호버 배경이 뜨면 "눌리는데 안 눌린다"로 읽힌다.
+    /// `.disabled` 가 걸린 순간 자동으로 꺼지도록 환경값을 본다.
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // 글리프 자체는 건드리지 않는다. 크기·색·굵기 모두 그대로다.
+            .frame(width: Self.hitSize, height: Self.hitSize)
+            .background {
+                Circle().fill(fill(isPressed: configuration.isPressed))
+            }
+            // **밝아지는 곳 = 눌리는 곳.** 배경과 판정 영역의 모양을 같게 둔다.
+            .contentShape(Circle())
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private func fill(isPressed: Bool) -> Color {
+        guard isEnabled else { return .clear }
+        if isPressed { return Color.primary.opacity(0.13) }
+        return Color.primary.opacity(isHovering ? 0.07 : 0)
+    }
 }
 
 /// 그리드에 무엇을 보여줄지 고르는 목록.
