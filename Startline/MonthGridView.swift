@@ -872,6 +872,12 @@ private struct MonthHeaderView: View {
                 .font(.title2.bold())
                 .frame(width: Self.titleWidth, alignment: .leading)
 
+            // 제목만 왼쪽에 남기고 나머지는 전부 오른쪽 끝으로 민다.
+            // 컨트롤이 왼쪽 절반에 몰려 있으면 가운데가 크게 비어 좌우 어느 쪽도
+            // 정렬 기준이 서지 않는다. 고정 오프셋이 아니라 Spacer 라서 창 폭이
+            // 변해도 따라온다.
+            Spacer(minLength: 12)
+
             HStack(spacing: 2) {
                 Button { manager.goToPreviousMonth() } label: { Image(systemName: "chevron.left") }
                     .help("이전 달")
@@ -899,8 +905,6 @@ private struct MonthHeaderView: View {
             .buttonStyle(.plain)
             .padding(.leading, 22)
 
-            Spacer()
-
             Button {
                 isShowingCalendarList.toggle()
             } label: {
@@ -910,6 +914,10 @@ private struct MonthHeaderView: View {
             }
             .buttonStyle(.borderless)
             .help("보여줄 것 고르기")
+            // 앞쪽 「‹ › 오늘」은 탐색, 여기부터는 도구·상태다. 성격이 달라 간격으로 가른다.
+            // 붙여 두면 컨트롤 여섯 개가 한 덩어리로 뭉쳐 오히려 읽기 어려워진다.
+            // 구분선은 쓰지 않는다 — 헤더에 선이 하나 더 생기면 그리드와 경쟁한다.
+            .padding(.leading, 24)
             .popover(isPresented: $isShowingCalendarList, arrowEdge: .bottom) {
                 CalendarFilterList(manager: manager)
             }
