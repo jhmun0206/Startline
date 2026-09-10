@@ -133,6 +133,7 @@ struct DayDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     eventSection
+                    sectionDivider
                     taskSection
                 }
                 .padding(.horizontal, 20)
@@ -330,6 +331,19 @@ struct DayDetailView: View {
                 }
             }
         }
+    }
+
+    /// 섹션 사이를 가르는 옅은 선.
+    ///
+    /// **섹션을 박스로 묶지 않는다.** 항목이 이미 테두리 있는 카드라서
+    /// 섹션까지 박스로 두르면 테두리가 이중이 되어 더 복잡해 보인다.
+    ///
+    /// 선은 얇고 옅게 둔다. 진하면 화면이 조각난 인상이 된다.
+    /// 위아래 여백은 바깥 `VStack` 의 간격 14pt 가 그대로 맡는다.
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.18))
+            .frame(height: 1)
     }
 
     // MARK: - 머리글
