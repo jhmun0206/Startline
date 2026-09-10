@@ -133,14 +133,17 @@ struct DayDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     eventSection
-                    if !sectionTasks.isEmpty {
-                        taskSection
-                    }
+                    taskSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
                 // 카드 아래 빈 곳을 누르면 고른 것이 풀린다.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                //
+                // **`.top` 이 아니라 `.topLeading` 이다.** `.top` 은 가로로 **가운데**를
+                // 뜻한다. 항목이 없는 날에는 안쪽 VStack 이 글자 폭만큼만 좁아지는데,
+                // 그때 이 프레임이 그것을 한가운데로 밀어 「📅 일정」 머리글이
+                // 혼자 가운데 정렬된 것처럼 보였다.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
                 .onTapGesture { selection.clear() }
             }
@@ -224,15 +227,14 @@ struct DayDetailView: View {
     // MARK: - 2계층: 일정 + 딸린 할 일
 
     private var eventSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(title: "일정", systemImage: "calendar")
-
-            if events.isEmpty {
-                EmptyNote(text: "일정이 없습니다.")
-            } else {
-                ForEach(events) { dayEvent in
-                    eventCard(dayEvent)
-                }
+        PanelSection(
+            title: "일정",
+            systemImage: "calendar",
+            isEmpty: events.isEmpty,
+            emptyText: "일정이 없습니다."
+        ) {
+            ForEach(events) { dayEvent in
+                eventCard(dayEvent)
             }
         }
     }
@@ -305,9 +307,12 @@ struct DayDetailView: View {
     // MARK: - 3계층: 이 날의 할 일
 
     private var taskSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(title: "할 일", systemImage: "checklist")
-
+        PanelSection(
+            title: "할 일",
+            systemImage: "checklist",
+            isEmpty: sectionTasks.isEmpty,
+            emptyText: "할 일이 없습니다."
+        ) {
             ForEach(sectionTasks) { resolved in
                 // 일정 카드와 같은 방식이다. 하이라이트는 카드 안쪽만 칠한다.
                 PanelCard(inset: CardMetrics.borderGap) {
@@ -487,4 +492,33 @@ struct EventRow: View {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+}
+
+/// 우측 패널의 한 섹션. 머리글 + 내용, 비어 있으면 빈 상태 문구.
+///
+/// **「일정」과 「할 일」이 같은 규칙을 쓴다.** 예전에는 「일정」만 「일정이 없습니다.」를
+/// 띄우고 「할 일」은 비면 섹션째 사라졌다. 같은 자리의 두 섹션이 다르게 굴어
+/// 어느 쪽이 원래 규칙인지 알 수 없었다.
+///
+/// **폭을 항상 채운다.** 안 채우면 항목이 없는 날에 이 뷰가 글자 폭만큼만 좁아지고,
+/// 바깥 프레임이 그것을 가운데로 밀어 머리글만 혼자 가운데 정렬된 것처럼 보인다.
+private struct PanelSection<Content: View>: View {
+    let title: String
+    let systemImage: String
+    let isEmpty: Bool
+    let emptyText: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionLabel(title: title, systemImage: systemImage)
+
+            if isEmpty {
+                EmptyNote(text: emptyText)
+            } else {
+                content
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
