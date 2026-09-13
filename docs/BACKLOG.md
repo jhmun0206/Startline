@@ -187,6 +187,20 @@ startPage = (24 / 700).rounded() = 0    → months[0]
 - **배경:** SwiftData 스토어를 App Group 공유 컨테이너에 만들되, 컨테이너 URL을 못 얻거나 열기에 실패하면 앱 기본 위치로 폴백한다. 앱은 정상 동작하지만 **위젯과 스토어가 공유되지 않는다.** 폴백이 일어나도 화면에 아무 표시가 없어 Phase 2에서 원인 추적이 어려울 수 있다.
 - **발생 위치:** [StartlineApp.swift](../Startline/StartlineApp.swift) — `makeModelContainer()`
 - **해결 방향:** 폴백 발생 시 로그를 남기고, 위젯을 붙이는 시점에 실제 스토어 경로가 `~/Library/Group Containers/group.com.ericmun.startline/` 아래인지 확인한다. BL-004(Bundle ID 변경)와 함께 점검한다.
+- **2026-09-13 부분 해소 — 로그를 붙였다. 항목은 닫지 않는다.**
+
+  `try?` 가 실패 이유를 삼키던 것을 `do/catch` 로 바꾸고, **실제로 연 파일의 절대 경로**를
+  남기게 했다. 「App Group 을 쓰기로 했다」가 아니라 「이 파일을 열었다」가 찍힌다.
+  폴백과 실패 이유는 `error`, 정상은 `info` 레벨이다.
+
+      log show --last 5m --info --predicate 'subsystem == "com.ericmun.startline"'
+
+  **닫지 않는 이유:** 이 항목의 나머지 절반은 「위젯을 붙이는 시점에 실제 경로를 확인한다」인데
+  위젯 타겟(BL-003)이 아직 없다. 폴백이 일어났을 때 **화면에 알리는 것**도 하지 않았다 —
+  이번 범위가 아니었다. 지금 상태는 「로그를 보면 알 수 있다」까지다.
+
+  ※ 이 로그는 진단용 임시 코드가 아니다. 걷어내지 말 것. (BL-039 같은 일회성 진단과 다름)
+- **관련:** BL-003(위젯), BL-004(Bundle ID 변경 — 이 로그로 검증한다)
 - **등록일:** 2026-09-05
 
 ### BL-014 · CloudKit 동기화 미연결
