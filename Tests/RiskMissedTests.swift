@@ -197,4 +197,54 @@ func testRiskAndMissed() {
         missedList.map(\.task.title),
         ["가장 오래", "중간", "최근"]
     )
+
+    // ── 배너가 세는 개수 — 바꾸기 전과 후
+    //
+    // 예전 조건은 마감을 보지 않아 **마감까지 지난 일까지 「오늘 시작할 일」로 셌다.**
+    let mixed = [
+        classified("오늘 시작", dueAt: date(2026, 9, 15, 9, 0), duration: 24 * 3600, status: .notStarted),
+        classified("시작 놓침·마감 남음", dueAt: date(2026, 9, 20, 18, 0), duration: 10 * day, status: .notStarted),
+        classified("마감까지 지남", dueAt: date(2026, 9, 5, 18, 0), duration: 3600, status: .notStarted),
+        classified("마감 지남·진행 중", dueAt: date(2026, 9, 3, 18, 0), duration: 3600, status: .inProgress),
+        classified("완료", dueAt: date(2026, 9, 14, 20, 0), duration: 3600, status: .done)
+    ]
+
+    /// 바꾸기 전 조건을 그대로 옮긴 것. 비교용이며 앱은 더 이상 쓰지 않는다.
+    func oldBannerRule(_ resolved: ResolvedTask) -> Bool {
+        guard let startDeadline = resolved.startDeadline else { return false }
+        if cal.isDate(startDeadline, inSameDayAs: now) { return true }
+        return resolved.task.status == .notStarted && startDeadline < now
+    }
+
+    let before = mixed.filter(oldBannerRule).filter { $0.task.status != .done }
+    let after = mixed
+        .filter { $0.isTodaysStart(now: now, calendar: cal) }
+        .filter { $0.task.status != .done }
+
+    // 옛 조건도 늦은 항목 분기에 `.notStarted` 를 요구했다. 그래서 「마감 지남·진행 중」은
+    // 바꾸기 전에도 배너에 없었다. 이번 변경으로 실제로 빠지는 것은 **미시작인데 마감까지
+    // 지난 항목** 하나뿐이다.
+    report.equal("배너 — 바꾸기 전 개수", before.count, 3)
+    report.equal("배너 — 바꾼 뒤 개수", after.count, 2)
+    report.equal(
+        "빠진 것은 미시작·마감까지 지난 항목뿐",
+        Set(before.map(\.task.title)).subtracting(after.map(\.task.title)),
+        ["마감까지 지남"]
+    )
+    report.check(
+        "진행 중·마감 지남은 바꾸기 전에도 배너에 없었다",
+        !before.contains { $0.task.title == "마감 지남·진행 중" }
+    )
+    report.check(
+        "빠진 둘은 「기한 지난 할 일」이 받는다",
+        mixed.filter { $0.isMissed(now: now) }.map(\.task.title).sorted()
+            == ["마감 지남·진행 중", "마감까지 지남"]
+    )
+
+    // 완료한 것도 세는 대상에는 들어온다 — 「다 마쳤어요」와 「원래 없었다」를 가르기 위해
+    report.check(
+        "완료 항목은 세는 대상에 남는다",
+        mixed.filter { $0.isTodaysStart(now: now, calendar: cal) }
+            .contains { $0.task.title == "완료" }
+    )
 }

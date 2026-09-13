@@ -144,13 +144,13 @@ struct TodayStartSection: View {
     private var calendar: Calendar { .current }
 
     /// 오늘 시작해야 하는 일. 완료한 것도 「원래 있었는지」를 세기 위해 포함한다.
+    ///
+    /// **판정은 `ResolvedTask.isTodaysStart` 하나만 쓴다.** 예전에는 조건을 여기서 직접
+    /// 적었고, 그래서 **마감까지 지난 일까지 「오늘 시작할 일」로 세고 있었다.**
+    /// 마감이 지난 것을 오늘 시작하라고 말하는 것은 말이 안 된다.
+    /// 그런 항목은 맨 아래 「기한 지난 할 일」이 맡는다.
     private var todaysTasks: [ResolvedTask] {
-        tasks.filter { resolved in
-            guard let startDeadline = resolved.startDeadline else { return false }
-            if calendar.isDate(startDeadline, inSameDayAs: now) { return true }
-            // 시작 시점을 놓친 채 아직 손대지 않은 것도 오늘 몫이다.
-            return resolved.task.status == .notStarted && startDeadline < now
-        }
+        tasks.filter { $0.isTodaysStart(now: now, calendar: calendar) }
     }
 
     private var remainingCount: Int {
