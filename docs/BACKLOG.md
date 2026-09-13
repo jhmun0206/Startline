@@ -103,7 +103,7 @@ startPage = (24 / 700).rounded() = 0    → months[0]
 - **해결 방향:** 위젯 타겟 생성 직후 Build Settings에서 배포 타겟을 확인하고, 앱 타겟과 어긋나면 맞춘다. 명세서 3장 기준은 macOS 14.0+.
 - **등록일:** 2026-09-05
 
-### BL-004 · Bundle Identifier가 역방향 도메인 관례에 어긋남
+### BL-004 · (완료) Bundle Identifier가 역방향 도메인 관례에 어긋남
 
 - **우선순위:** P1
 - **Phase:** 3 (배포)
@@ -111,6 +111,34 @@ startPage = (24 / 700).rounded() = 0    → months[0]
 - **발생 위치:** `Startline.xcodeproj/project.pbxproj` — `PRODUCT_BUNDLE_IDENTIFIER`
 - **해결 방향:** App Store Connect에 앱을 등록하기 **전에** 바꾼다. 등록 후에는 변경이 불가능하다. 변경 시 함께 손봐야 하는 것: 프로비저닝 프로파일, App Group 컨테이너 경로, 이미 승인된 캘린더 접근 권한(번들 ID가 바뀌면 TCC가 새 앱으로 인식해 재승인 필요). SwiftData 스토어를 붙이기 전에 처리하는 편이 마이그레이션 부담이 적다.
 - **등록일:** 2026-09-05
+- **2026-09-13 완료.** `ericmun.Startline` → `com.ericmun.Startline`
+
+  **고친 곳은 `project.pbxproj` 두 줄(Debug/Release)뿐이다.** entitlements·Info.plist·소스
+  어디에도 번들 ID 문자열이 없었다. (Info.plist 는 `GENERATE_INFOPLIST_FILE` 로 생성된다)
+
+  **스토어 경로는 그룹 식별자로만 결정된다.** 번들 ID 가 들어가지 않는다.
+  `com.apple.security.application-groups` 는 `group.com.ericmun.startline` 그대로라
+  `~/Library/Group Containers/group.com.ericmun.startline/Startline.store` 가 유지된다.
+  서명된 산출물의 entitlement 를 읽어 확인했다 — 자동 서명이 새 App ID 에 App Groups
+  capability 를 그대로 다시 붙였다.
+
+  **잃은 것** — 샌드박스 컨테이너가 `ericmun.Startline` → `com.ericmun.Startline` 로
+  갈리면서 UserDefaults 가 새 판에서 시작한다.
+  - `startline.hiddenCalendarIDs` (캘린더 3개 숨김) — **다시 설정해야 한다**
+  - `startline.showsTasks` / `showsTaskSpan` — 기본값과 같아 영향 없음
+  - `NSWindow Frame …` (창 위치·크기) — 기본값으로 열림
+
+  캘린더·알림 권한은 새 앱으로 인식되어 재승인이 필요하다. 일정은 EventKit 에서
+  다시 읽히고, 알림 예약은 롤링 스케줄러가 다시 깐다. 둘 다 보존할 데이터가 없다.
+
+  **`-wal` 을 빠뜨리면 안 된다.** 백업 중 확인한 것 — 본 `Startline.store` 만 복사하면
+  할 일이 1건이고, `-wal`·`-shm` 까지 함께 복사해야 3건이 나온다. 앱을 정상 종료해도
+  WAL 이 합쳐지지 않는다. 스토어를 옮기거나 백업할 때는 **세 파일을 함께** 다룬다.
+
+  백업: `~/Desktop/Startline-백업-BL004-20260913-215714`,
+  `~/Desktop/Startline-백업-BL004-20260913-223432-앱종료후`
+- **관련:** BL-013(이 변경을 검증한 스토어 위치 로그)
+- **커밋:** (아래 해시)
 
 ### BL-005 · 중복 일정 판정 기준 (결정 기록 — 변경 금지)
 
