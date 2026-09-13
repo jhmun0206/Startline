@@ -64,12 +64,18 @@ func testGridTaskPlacement() {
         days.count % 7 == 0
     )
 
+    // 아래 검사는 **플래그를 켠 상태**(`showsEcho: true`)를 본다.
+    //
+    // 메아리는 지금 꺼져 있지만(`FeatureFlags.todayEcho == false`) 코드는 남아 있다.
+    // 켠 상태를 검증해 두지 않으면 나중에 되살릴 때 **이미 깨져 있을 수 있다.**
+    // 끈 상태는 이 함수 뒤에서 따로 본다.
     func place(
         startDeadline: Date,
         dueAt: Date,
         now: Date,
         status: TaskStatus = .notStarted,
         showsSpan: Bool = true,
+        showsEcho: Bool = true,
         gridStart: Date = gridStart,
         gridEnd: Date = gridEnd
     ) -> [GridTaskItem] {
@@ -79,6 +85,7 @@ func testGridTaskPlacement() {
             gridEnd: gridEnd,
             now: now,
             showsSpan: showsSpan,
+            showsEcho: showsEcho,
             calendar: cal
         )
     }
@@ -180,4 +187,67 @@ func testGridTaskPlacement() {
     report.equal("점선 끔 → 막대 1개", noSpan.count, 1)
     report.equal("점선 끔 → 시작 지점만", noSpan.first.map(span), "09/07~09/07")
     report.check("점선 끔 → 같은 줄이므로 메아리 없음", !noSpan.contains { $0.isEcho })
+
+    // ── 플래그를 끈 상태 (지금 출하되는 동작)
+    report.begin("오늘 메아리 — 플래그 끈 상태")
+
+    report.check(
+        "출하 기본값이 꺼짐 (FeatureFlags.todayEcho == false)",
+        FeatureFlags.todayEcho == false
+    )
+
+    // 켰을 때 메아리가 나던 두 경우가 꺼졌을 때 어떻게 되는지.
+    // c1 — 본 막대가 그리드 밖. 켜면 메아리만 1개, 끄면 아무것도 없다.
+    let c1Off = place(
+        startDeadline: date(2026, 8, 20, 9), dueAt: date(2026, 8, 21, 9),
+        now: date(2026, 9, 9, 12), showsEcho: false
+    )
+    report.equal("c1) 그리드 밖 + 플래그 끔 → 막대 0개", c1Off.count, 0)
+
+    // c2 — 그리드 안 다른 주 행. 켜면 2개, 끄면 본 막대 1개만.
+    let c2Off = place(
+        startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9),
+        now: date(2026, 9, 9, 12), showsEcho: false
+    )
+    report.equal("c2) 다른 주 행 + 플래그 끔 → 막대 1개", c2Off.count, 1)
+    report.check("c2) 남은 것은 본 막대", c2Off.first?.isEcho == false)
+    report.equal("c2) 본 막대 구간은 그대로 09/01~09/02", c2Off.first.map(span), "09/01~09/02")
+
+    // 본 막대 계산은 플래그와 무관하다 — 켜든 끄든 같아야 한다.
+    let onMain = place(
+        startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9),
+        now: date(2026, 9, 9, 12), showsEcho: true
+    ).filter { !$0.isEcho }
+    report.equal("본 막대는 플래그와 무관", onMain.map(span), c2Off.map(span))
+
+    // 메아리가 애초에 안 나던 경우들은 플래그를 꺼도 그대로다.
+    let aOff = place(
+        startDeadline: date(2026, 9, 7, 19), dueAt: date(2026, 9, 8, 19),
+        now: date(2026, 9, 9, 12), showsEcho: false
+    )
+    report.equal("a) 같은 주 행 + 플래그 끔 → 막대 1개 (변화 없음)", aOff.count, 1)
+    report.equal("a) 구간 그대로", aOff.first.map(span), "09/07~09/08")
+
+    // 끈 상태에서는 어떤 입력으로도 메아리가 나오지 않는다.
+    let everyCase: [[GridTaskItem]] = [
+        place(startDeadline: date(2026, 8, 20, 9), dueAt: date(2026, 8, 21, 9), now: date(2026, 9, 9, 12), showsEcho: false),
+        place(startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9), now: date(2026, 9, 9, 12), showsEcho: false),
+        place(startDeadline: date(2026, 9, 7, 19), dueAt: date(2026, 9, 8, 19), now: date(2026, 9, 9, 12), showsEcho: false),
+        place(startDeadline: date(2026, 9, 5, 9), dueAt: date(2026, 9, 7, 9), now: date(2026, 9, 9, 12), showsEcho: false),
+        place(startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9), now: date(2026, 9, 9, 12), showsEcho: false, gridStart: gridStart, gridEnd: gridEnd)
+    ]
+    report.check(
+        "끈 상태에서는 어떤 입력으로도 메아리가 없다",
+        everyCase.allSatisfy { items in !items.contains { $0.isEcho } }
+    )
+
+    // isEcho·키 체계는 남아 있어야 한다 — 플래그를 켜면 즉시 돌아온다.
+    let keyed = place(
+        startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9),
+        now: date(2026, 9, 9, 12), showsEcho: true
+    )
+    report.check(
+        "켜면 |main / |echo 키 체계가 그대로 살아 있다",
+        keyed.contains { $0.key.hasSuffix("main") } && keyed.contains { $0.key.hasSuffix("echo") }
+    )
 }

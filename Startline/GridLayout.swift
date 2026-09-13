@@ -110,12 +110,16 @@ nonisolated enum GridTaskPlacement {
     ///   - tasks: 계산이 끝난 할 일 전체.
     ///   - gridStart / gridEnd: 그리드에 놓인 첫 날과 마지막 날.
     ///   - showsSpan: 착수일부터 마감일까지 점선으로 이을지.
+    ///   - showsEcho: 시작할 때를 놓친 항목을 오늘 칸에도 그릴지.
+    ///     기본값이 `FeatureFlags.todayEcho` 라 호출부는 따로 신경 쓰지 않아도 되고,
+    ///     검증에서는 켠 상태와 끈 상태를 **둘 다** 돌려볼 수 있다.
     static func items(
         for tasks: [ResolvedTask],
         gridStart: Date,
         gridEnd: Date,
         now: Date,
         showsSpan: Bool,
+        showsEcho: Bool = FeatureFlags.todayEcho,
         calendar: Calendar
     ) -> [GridTaskItem] {
         let rangeStart = calendar.startOfDay(for: gridStart)
@@ -171,7 +175,9 @@ nonisolated enum GridTaskPlacement {
                 start <= row.upperBound && end >= row.lowerBound
             } ?? false
 
-            if resolved.task.status == .notStarted,
+            // 아래 판정과 그리기는 **그대로 남겨 둔다.** 플래그를 켜면 즉시 돌아온다.
+            if showsEcho,
+               resolved.task.status == .notStarted,
                let startDeadline = resolved.startDeadline,
                startDeadline < now,
                !mainBarShowsInTodayRow,
