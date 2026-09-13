@@ -252,6 +252,9 @@ struct TaskRow: View {
     /// **들여쓰기 말고는 아무것도 다르지 않다.** 같은 데이터가 위치에 따라 다르게 보이면
     /// 사용자는 둘을 다른 것으로 인식한다. 계층은 들여쓰기와 구분선으로만 나타낸다.
     var isNested = false
+    /// 「기한 지난 할 일」 섹션에서는 **언제까지였는지**를 보여준다.
+    /// 다른 자리에서는 「언제 시작하는지」가 중요하지만, 여기서는 이미 지난 마감이 핵심이다.
+    var showsMissedDeadline = false
     /// 「할 일」 섹션에서는 부모 일정명을 함께 보여준다.
     /// 부모 카드 아래에서는 이미 맥락이 있으므로 붙이지 않는다.
     var showsParentContext = false
@@ -337,6 +340,20 @@ struct TaskRow: View {
     /// 남은 시간을 숫자로 환산해 보여주지 않는다. (명세서 5.4)
     private var detailText: String {
         var parts: [String] = []
+
+        // 명세서 5.4 — 「3일 지났습니다」처럼 지난 시간을 숫자로 환산하지 않는다.
+        // 날짜를 밝히는 것까지만 한다.
+        if showsMissedDeadline {
+            if let due = resolved.effectiveDueAt {
+                parts.append("\(StartlineFormat.spokenDayTime(due))까지였어요")
+            } else {
+                parts.append("마감 없음")
+            }
+            if let duration = task.estimatedDuration {
+                parts.append("\(StartlineFormat.duration(duration)) 걸림")
+            }
+            return parts.joined(separator: " · ")
+        }
 
         if let deadline = resolved.startDeadline {
             parts.append("\(StartlineFormat.spokenDayTime(deadline))에 시작")

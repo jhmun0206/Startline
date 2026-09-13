@@ -84,6 +84,11 @@ struct DayDetailView: View {
 
         return resolvedTasks
             .filter { !nestedIDs.contains($0.id) }
+            // 마감까지 지난 것은 맨 아래 「기한 지난 할 일」이 전담한다.
+            // 그 섹션은 **선택 날짜와 무관하게 늘 보이므로**, 여기서 빼도 화면에서 사라지지 않는다.
+            // 반대로 여기 두면 날짜를 옮길 때마다 나타났다 사라져 추적이 안 되고,
+            // 마감일을 고른 순간에는 같은 항목이 두 섹션에 동시에 나온다.
+            .filter { !$0.isMissed(now: now) }
             .filter(matchesSelectedDay)
             .sorted { lhs, rhs in
                 let l = lhs.startDeadline ?? lhs.effectiveDueAt ?? .distantFuture
@@ -105,13 +110,29 @@ struct DayDetailView: View {
             return true
         }
         // 시작 시점을 놓친 것은 오늘 화면에서 계속 보여야 한다.
-        if resolved.task.status == .notStarted,
-           let startDeadline = resolved.startDeadline,
-           startDeadline < now,
-           manager.calendar.isDateInToday(selected) {
+        // 판정은 `isAtRisk` 하나만 쓴다 — 마감까지 지난 것은 이미 걸러져 들어오지 않는다.
+        if resolved.isAtRisk(now: now), manager.calendar.isDateInToday(selected) {
             return true
         }
         return false
+    }
+
+    /// 마감까지 지났는데 아직 끝내지 않은 할 일. (명세서 9.4 「놓침」)
+    ///
+    /// **선택 날짜와 무관하다.** 어느 날짜를 보든 같은 목록이다.
+    /// 달을 넘기면 그리드에서 사라지고 알림도 다 울려 버려, 시간이 갈수록 안 보이게 되는
+    /// 항목들이다. 여기가 마지막으로 붙잡아 두는 자리다.
+    ///
+    /// 오래 지난 것이 위로 온다 — 마감이 이른 순. 가장 오래 방치된 것을 먼저 보여준다.
+    private var missedTasks: [ResolvedTask] {
+        resolvedTasks
+            .filter { $0.isMissed(now: now) }
+            .sorted { lhs, rhs in
+                let l = lhs.effectiveDueAt ?? .distantPast
+                let r = rhs.effectiveDueAt ?? .distantPast
+                if l != r { return l < r }
+                return lhs.task.title < rhs.task.title
+            }
     }
 
     /// 부모 일정 식별자 → 딸린 할 일. 2계층에서 일정 아래 들여쓰기로 붙인다.
@@ -135,6 +156,18 @@ struct DayDetailView: View {
                     eventSection
                     sectionDivider
                     taskSection
+
+                    // **이 섹션만 「비면 숨김」이다. 통일이 안 된 것이 아니라 의도다.**
+                    //
+                    // 「일정」·「할 일」은 비어도 문구를 띄운다. 그 자리에 무엇이 오는지를
+                    // 늘 알려야 하기 때문이다. 반면 기한 지난 할 일은 **없는 것이 정상 상태**라,
+                    // 「기한 지난 할 일이 없습니다.」가 늘 떠 있으면 화면만 복잡해진다.
+                    //
+                    // 맨 아래에 두는 이유도 같다. 나타나고 사라져도 위쪽이 밀리지 않는다.
+                    if !missedTasks.isEmpty {
+                        sectionDivider
+                        missedSection
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
@@ -323,6 +356,35 @@ struct DayDetailView: View {
                     ) {
                         TaskRow(
                             resolved: resolved,
+                            showsParentContext: true,
+                            onEdit: { editingTask = resolved.task },
+                            onDelete: { delete(resolved) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 4계층: 기한 지난 할 일 (명세서 9.4 「놓침」)
+
+    private var missedSection: some View {
+        PanelSection(
+            title: "기한 지난 할 일",
+            systemImage: "exclamationmark.circle",
+            isEmpty: false,
+            emptyText: ""
+        ) {
+            ForEach(missedTasks) { resolved in
+                // 「할 일」 섹션과 같은 카드·호버·클릭 경로를 쓴다. 이 섹션만의 구조를 따로 만들지 않는다.
+                PanelCard(inset: CardMetrics.borderGap) {
+                    HoverRegion(
+                        onSelect: { selection.select(task: resolved, among: resolvedTasks) },
+                        onOpen: { editingTask = resolved.task }
+                    ) {
+                        TaskRow(
+                            resolved: resolved,
+                            showsMissedDeadline: true,
                             showsParentContext: true,
                             onEdit: { editingTask = resolved.task },
                             onDelete: { delete(resolved) }

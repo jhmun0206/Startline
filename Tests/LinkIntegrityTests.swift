@@ -621,6 +621,7 @@ enum LinkIntegrityTests {
                 testEdgeCases()
                 testEventGrouping()
                 testGridTaskPlacement()
+                testRiskAndMissed()
                 exit(report.finish())
             }
         } catch {

@@ -34,12 +34,45 @@ nonisolated struct ResolvedTask: Identifiable {
     var id: UUID { task.id }
     var isAttached: Bool { task.isAttached }
 
-    /// 「오늘 착수」에 들어갈 항목인지. (명세서 5.2)
-    var needsStartAttention: Bool {
-        switch judgment {
-        case .startToday, .overdue: return true
-        case .relaxed, nil: return false
-        }
+    // MARK: - 「위험」과 「놓침」 (명세서 9.4)
+
+    // 같은 데이터를 두 곳에서 다르게 판정하면 언젠가 어긋난다. 실제로 그리드와 우측 패널이
+    // 서로 다른 비교자를 써서 정렬이 어긋난 적이 있다. 그래서 판정식을 여기 하나로 모은다.
+    //
+    //   위험 = 시작할 때가 지났는데 아직 손대지 않음   → 배너 + 그리드 막대 + 알림
+    //   놓침 = 마감까지 지났는데 아직 끝내지 않음      → 「기한 지난 할 일」 섹션
+    //
+    // **두 집합은 겹치지 않는다.** 마감까지 지난 일은 「오늘 시작할 일」이 아니다.
+
+    /// 마감까지 지났는데 아직 끝내지 않았다. (명세서 9.4 「놓침」)
+    ///
+    /// 완료 여부만 본다. 시작했든 안 했든 마감이 지났으면 놓친 것이다.
+    func isMissed(now: Date) -> Bool {
+        guard task.status != .done else { return false }
+        guard let effectiveDueAt else { return false }
+        return effectiveDueAt < now
+    }
+
+    /// 시작할 때가 지났는데 아직 손대지 않았다. (명세서 9.4 「위험」)
+    ///
+    /// **마감까지 지났으면 위험이 아니라 놓침이다.** 그쪽이 맡는다.
+    func isAtRisk(now: Date) -> Bool {
+        guard task.status == .notStarted else { return false }
+        guard let startDeadline, startDeadline < now else { return false }
+        return !isMissed(now: now)
+    }
+
+    /// 배너가 세는 「오늘 몫」. (명세서 5.2)
+    ///
+    /// 오늘이 시작하는 날이거나, 시작할 때를 이미 놓친 것.
+    /// 완료한 것도 들어온다 — 「원래 있었는데 다 했다」와 「원래 없었다」를 가르기 위해서다.
+    ///
+    /// 마감까지 지난 일은 빼낸다. 그것을 「오늘 시작할 일」로 세는 것은 말이 안 된다.
+    func isTodaysStart(now: Date, calendar: Calendar) -> Bool {
+        guard let startDeadline else { return false }
+        if isMissed(now: now) { return false }
+        if calendar.isDate(startDeadline, inSameDayAs: now) { return true }
+        return isAtRisk(now: now)
     }
 
     /// "회의 장소 연락 → GDG 미팅" — 부모가 있으면 맥락을 함께 보여준다. (명세서 5.2)

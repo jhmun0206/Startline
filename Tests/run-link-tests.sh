@@ -27,6 +27,7 @@ SOURCES=(
   "$ROOT/Startline/GridLayout.swift"
   "$ROOT/Tests/EventGroupingTests.swift"
   "$ROOT/Tests/GridTaskPlacementTests.swift"
+  "$ROOT/Tests/RiskMissedTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 
