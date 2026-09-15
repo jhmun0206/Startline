@@ -80,6 +80,8 @@ struct EventEditorView: View {
         var title = ""
         /// 부모 일정 기준 며칠 전까지가 **마감**인지.
         var daysBefore = 1
+        /// 「며칠 전까지」의 직접 입력 줄을 펼쳤는지.
+        var isEnteringCustomDays = false
         /// 소요시간. 고르면 착수일 역산이 켜진다.
         var duration: TimeInterval?
         /// 직접 입력 줄을 펼쳤는지.
@@ -388,15 +390,6 @@ struct EventEditorView: View {
                         .textFieldStyle(.plain)
                         .font(.callout)
 
-                    Stepper(value: draft.daysBefore, in: 0...365) {
-                        // "며칠 전"이 마감이라는 것을 문구로 드러낸다.
-                        Text(draft.wrappedValue.daysBefore == 0 ? "당일까지" : "\(draft.wrappedValue.daysBefore)일 전까지")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 62, alignment: .trailing)
-                    }
-                    .fixedSize()
-
                     Button {
                         draftTasks.removeAll { $0.id == draft.wrappedValue.id }
                     } label: {
@@ -406,6 +399,12 @@ struct EventEditorView: View {
                     .buttonStyle(.borderless)
                     .help("이 줄 지우기")
                 }
+
+                DaysBeforeChips(
+                    label: "언제까지",
+                    daysBefore: draft.daysBefore,
+                    isEnteringCustom: draft.isEnteringCustomDays
+                )
 
                 HStack(spacing: 4) {
                     Text("얼마나")
@@ -455,19 +454,8 @@ struct EventEditorView: View {
         isOn: () -> Bool,
         action: @escaping () -> Void
     ) -> some View {
-        let on = isOn()
-        return Text(label)
-            .font(.caption2)
-            .fontWeight(on ? .semibold : .regular)
-            .foregroundStyle(on ? Color.accentColor : .secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(on ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10))
-            )
-            .contentShape(Rectangle())
-            .onTapGesture(perform: action)
+        // 모양은 `SheetChip` 하나로 모았다. 보이는 결과는 종전과 같다.
+        SheetChip(label: label, isOn: isOn(), action: action)
     }
 
     /// 이 일정에 이미 붙어 있는 할 일.

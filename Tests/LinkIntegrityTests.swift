@@ -622,6 +622,7 @@ enum LinkIntegrityTests {
                 testEventGrouping()
                 testGridTaskPlacement()
                 testRiskAndMissed()
+                testDaysBeforeChips()
                 exit(report.finish())
             }
         } catch {

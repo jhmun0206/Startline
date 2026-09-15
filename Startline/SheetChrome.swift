@@ -268,3 +268,98 @@ struct CalendarPickerField: View {
         .frame(maxHeight: 260)
     }
 }
+
+// MARK: - 칩
+
+/// 시트 안에서 값 하나를 고르는 작은 칩.
+///
+/// 소요시간 칩이 쓰던 모양 그대로다. 「며칠 전까지」도 같은 모양을 쓰게 하려고 꺼냈다.
+/// 한 시트 안에서 같은 일을 하는 것이 다르게 생기면 안 된다.
+struct SheetChip: View {
+    let label: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Text(label)
+            .font(.caption2)
+            .fontWeight(isOn ? .semibold : .regular)
+            .foregroundStyle(isOn ? Color.accentColor : .secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isOn ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture(perform: action)
+    }
+}
+
+/// 부모 일정 기준 **「며칠 전까지」**를 고르는 칩 한 줄.
+///
+/// **「일정 추가」의 초안 행과 「할 일」 시트가 같은 이 부품을 쓴다.**
+/// 한쪽만 바꾸면 추가와 수정이 어긋난다.
+///
+/// 예전에는 위아래 화살표(스테퍼)였다. 처음 보는 사람은 그것이 무엇인지 알 수 없고,
+/// 값을 바꾸려면 여러 번 눌러야 하며, 고를 수 있는 범위가 보이지 않았다.
+///
+/// **날짜 피커로 바꾸지 말 것.** 딸린 할 일의 마감은 부모 일정 기준 **상대값**으로
+/// 저장된다. (명세서 4.2) 부모가 옮겨지면 할 일도 따라가야 하기 때문이다.
+/// 절대 날짜를 보여주면 그 의미가 사라지고, 부모를 옮겨도 안 따라올 것으로 오해한다.
+struct DaysBeforeChips: View {
+    let label: String
+    @Binding var daysBefore: Int
+    /// 「직접」을 펼쳤는지. 칩에 없는 값을 불러왔을 때도 켜진다.
+    @Binding var isEnteringCustom: Bool
+
+    /// 칩으로 내놓는 값들. 여기 없는 값은 「직접」이 받는다.
+    static let presets: [Int] = [0, 1, 3, 7]
+
+    static func label(for days: Int) -> String {
+        switch days {
+        case 0: return "당일"
+        case 7: return "1주 전"
+        default: return "\(days)일 전"
+        }
+    }
+
+    /// 불러온 값이 칩에 없으면 「직접」을 켜 둔다. **값을 가까운 칩으로 바꾸지 않는다.** (원칙 1)
+    static func needsCustom(for days: Int) -> Bool {
+        !presets.contains(days)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            ForEach(Self.presets, id: \.self) { preset in
+                SheetChip(
+                    label: Self.label(for: preset),
+                    isOn: !isEnteringCustom && daysBefore == preset
+                ) {
+                    isEnteringCustom = false
+                    daysBefore = preset
+                }
+            }
+
+            SheetChip(label: "직접", isOn: isEnteringCustom) {
+                // 소요시간의 「직접」과 같다 — 눌러서 펼치고 다시 눌러서 접는다.
+                // 다만 값을 비우지는 않는다. 불러온 값을 보존해야 하기 때문이다.
+                isEnteringCustom.toggle()
+            }
+
+            if isEnteringCustom {
+                TextField("0", value: $daysBefore, format: .number)
+                    .textFieldStyle(.plain)
+                    .frame(width: 30)
+                    .multilineTextAlignment(.trailing)
+                Text("일 전까지").font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}

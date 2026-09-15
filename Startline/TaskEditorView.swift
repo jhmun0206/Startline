@@ -58,6 +58,8 @@ struct TaskEditorView: View {
     @State private var parentEvent: EKEvent?
     /// 부모 일정 시작 기준 며칠 전인지.
     @State private var daysBeforeParent = 1
+    /// 「며칠 전까지」의 직접 입력 줄을 펼쳤는지. 칩에 없는 값을 불러오면 켜진다.
+    @State private var isEnteringCustomDays = false
 
     /// UI로 표현할 수 없는 기존 리드타임(시간 단위 등)을 편집 중에 잃지 않도록 보관한다.
     @State private var preservedLeadTime: LeadTime?
@@ -222,15 +224,14 @@ struct TaskEditorView: View {
                         .font(.callout.bold())
                         .lineLimit(1)
                     Spacer(minLength: 6)
-                    Stepper(value: $daysBeforeParent, in: 0...365) {
-                        // 「전」이 아니라 「전까지」— 그 값이 마감이라는 것을 드러낸다.
-                        Text(daysBeforeParent == 0 ? "당일까지" : "\(daysBeforeParent)일 전까지")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 62, alignment: .trailing)
-                    }
-                    .fixedSize()
                 }
+
+                // 일정 폼의 초안 행과 **같은 부품**을 쓴다. 추가와 수정이 어긋나지 않게.
+                DaysBeforeChips(
+                    label: "언제까지",
+                    daysBefore: $daysBeforeParent,
+                    isEnteringCustom: $isEnteringCustomDays
+                )
             }
         } else {
             Text("위 달력에서 일정을 하나 고르세요.")
@@ -422,6 +423,9 @@ struct TaskEditorView: View {
             )
             if let offset = task.offsetFromParent {
                 daysBeforeParent = max(0, Int((-offset / (24 * 60 * 60)).rounded()))
+                // 칩에 없는 값(예: 5일 전)이면 「직접」을 켜 그 값을 그대로 보여준다.
+                // 가까운 칩으로 바꾸지 않는다. (원칙 1)
+                isEnteringCustomDays = DaysBeforeChips.needsCustom(for: daysBeforeParent)
             }
         }
 
