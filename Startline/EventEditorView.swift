@@ -351,7 +351,17 @@ struct EventEditorView: View {
     /// 만들 때뿐 아니라 **고칠 때도 붙일 수 있어야 한다.** 이미 연결된 할 일은
     /// 여기서 바로 고치고 지운다. (명세서 8장)
     private var taskSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // 행 사이를 12pt 로 벌린다.
+        //
+        // 한 행이 제목 + 「언제까지」 + 「얼마나 걸릴까요」 세 줄짜리 덩어리가 되면서
+        // 행이 2~3개일 때 어디까지가 한 행인지 구분되지 않았다.
+        // **행 안쪽 세로 여백이 5pt 인데 행 사이가 6pt 라 거의 같았다.**
+        // 간격이 안쪽 여백보다 확실히 커야 덩어리가 갈린다.
+        //
+        // 구분선은 쓰지 않는다. 그것은 우측 패널에서 **섹션**(일정/할 일/기한 지난)을
+        // 가르는 어휘다. 여기는 같은 종류의 항목이 반복되는 목록이라 간격으로 나눈다.
+        // 한 앱 안에서 「묶음을 나누는 방법」이 두 가지가 되면 안 된다.
+        VStack(alignment: .leading, spacing: 12) {
             Text("이 일정 전에 미리 할 일")
                 .font(.caption)
                 .foregroundStyle(.secondary)
