@@ -407,7 +407,9 @@ struct EventEditorView: View {
                 )
 
                 HStack(spacing: 4) {
-                    Text("얼마나")
+                    // 독립 「할 일」 시트가 같은 것을 「얼마나 걸릴까요」로 부른다.
+                    // 한 가지를 두 곳에서 다르게 부르지 않는다.
+                    Text("얼마나 걸릴까요")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
