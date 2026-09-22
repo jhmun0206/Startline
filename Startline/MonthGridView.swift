@@ -1190,7 +1190,10 @@ struct TaskPreviewCard: View {
 
             if let startDeadline = resolved.startDeadline {
                 Label(
-                    "\(StartlineFormat.spokenDayTime(startDeadline))에 시작",
+                    StartMomentText.short(
+                        startDeadline: startDeadline,
+                        effectiveDueAt: resolved.effectiveDueAt
+                    ),
                     systemImage: "flag"
                 )
                 .font(.callout)

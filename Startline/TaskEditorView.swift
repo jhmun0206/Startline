@@ -153,7 +153,10 @@ struct TaskEditorView: View {
     /// 착수마감이 산출될 때만 나온다. 남은 시간을 숫자로 환산하지 않는다. (명세서 5.4)
     private func startNote(_ deadline: Date) -> some View {
         Label(
-            "\(StartlineFormat.spokenDayTime(deadline))에 시작해야 해요",
+            StartMomentText.sentence(
+                startDeadline: deadline,
+                effectiveDueAt: effectiveDueAt
+            ),
             systemImage: "flag"
         )
         .font(.callout)

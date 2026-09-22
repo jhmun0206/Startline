@@ -356,7 +356,13 @@ struct TaskRow: View {
         }
 
         if let deadline = resolved.startDeadline {
-            parts.append("\(StartlineFormat.spokenDayTime(deadline))에 시작")
+            // 문구는 StartMomentText 한 곳에서 만든다. 마감과 다른 날이면 날짜까지만 말한다.
+            parts.append(
+                StartMomentText.short(
+                    startDeadline: deadline,
+                    effectiveDueAt: resolved.effectiveDueAt
+                )
+            )
         } else {
             parts.append("시작 시점 없음")
         }

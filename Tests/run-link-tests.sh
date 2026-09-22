@@ -26,6 +26,8 @@ SOURCES=(
   "$ROOT/Startline/FeatureFlags.swift"
   "$ROOT/Startline/SheetChrome.swift"
   "$ROOT/Startline/EventDeletion.swift"
+  "$ROOT/Startline/StartMomentText.swift"
+  "$ROOT/Startline/NotificationScheduler.swift"
   "$ROOT/Startline/GridSelection.swift"
   "$ROOT/Startline/GridLayout.swift"
   "$ROOT/Tests/EventGroupingTests.swift"
@@ -33,6 +35,7 @@ SOURCES=(
   "$ROOT/Tests/RiskMissedTests.swift"
   "$ROOT/Tests/DaysBeforeChipsTests.swift"
   "$ROOT/Tests/EventDeletionTextTests.swift"
+  "$ROOT/Tests/StartMomentTextTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 

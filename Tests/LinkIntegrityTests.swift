@@ -624,6 +624,7 @@ enum LinkIntegrityTests {
                 testRiskAndMissed()
                 testDaysBeforeChips()
                 testEventDeletionText()
+                testStartMomentText()
                 exit(report.finish())
             }
         } catch {

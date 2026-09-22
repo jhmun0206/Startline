@@ -65,6 +65,14 @@ final class NotificationScheduler {
     /// 명세서는 "경과"라고만 하므로 잠정값이다. (BL-031)
     nonisolated static let riskDelay: TimeInterval = 60 * 60
 
+    /// 날짜까지만 말하는 일을 **그날 몇 시에** 알릴지.
+    ///
+    /// `착수일 = 마감시각 − 소요시간` 을 그대로 쓰면 12시간짜리 작업이 새벽 4시에 울린다.
+    /// 표시만 날짜로 바꾸고 알림을 그 시각에 보내면 문제는 그대로 남는다.
+    ///
+    /// **설정 화면이 생기면 여기를 사용자 값으로 뺀다.** (BL-057)
+    nonisolated static let morningHour = 9
+
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// 실제로 예약된 개수.
     private(set) var scheduledCount = 0
@@ -227,7 +235,14 @@ final class NotificationScheduler {
             // 완료·진행 중은 알리지 않는다.
             guard task.status == .notStarted else { continue }
             // 리드타임이 없으면 시작 시점 자체가 없다.
-            guard let deadline = resolved.startDeadline else { continue }
+            guard let startDeadline = resolved.startDeadline else { continue }
+
+            // 알림 시각은 표시와 같은 규칙을 탄다. 날짜까지만 말하는 일은 그날 아침에 울린다.
+            let deadline = notifyMoment(
+                startDeadline: startDeadline,
+                effectiveDueAt: resolved.effectiveDueAt,
+                calendar: calendar
+            )
 
             let title = task.title
             let context = resolved.parentTitle.map { " (\($0))" } ?? ""
@@ -245,7 +260,15 @@ final class NotificationScheduler {
                         stage: stage,
                         fireDate: fireDate,
                         title: headline(for: stage),
-                        body: message(for: stage, title: title, context: context, deadline: deadline)
+                        body: message(
+                            for: stage,
+                            title: title,
+                            context: context,
+                            startDeadline: startDeadline,
+                            effectiveDueAt: resolved.effectiveDueAt,
+                            firesAt: fireDate,
+                            calendar: calendar
+                        )
                     )
                 )
             }
@@ -257,6 +280,25 @@ final class NotificationScheduler {
         }
 
         return limit == .max ? planned : Array(planned.prefix(limit))
+    }
+
+    /// 알림이 기준으로 삼는 시점.
+    ///
+    /// 화면 표시와 **같은 규칙**을 쓴다. (`StartMomentText`)
+    /// 마감과 같은 날이면 계산된 시각 그대로, 다른 날이면 **그날 아침 `morningHour` 시**다.
+    /// 표시는 날짜까지만 말하면서 알림은 새벽에 보내면 고친 것이 아니다.
+    nonisolated static func notifyMoment(
+        startDeadline: Date,
+        effectiveDueAt: Date?,
+        calendar: Calendar = .current
+    ) -> Date {
+        if let effectiveDueAt,
+           calendar.isDate(startDeadline, inSameDayAs: effectiveDueAt) {
+            return startDeadline
+        }
+        return calendar.date(
+            bySettingHour: morningHour, minute: 0, second: 0, of: startDeadline
+        ) ?? startDeadline
     }
 
     nonisolated static func fireDate(
@@ -288,11 +330,21 @@ final class NotificationScheduler {
         for stage: StartStage,
         title: String,
         context: String,
-        deadline: Date
+        startDeadline: Date,
+        effectiveDueAt: Date?,
+        firesAt: Date,
+        calendar: Calendar = .current
     ) -> String {
         switch stage {
         case .advance:
-            return "‘\(title)’\(context) — 내일 \(StartlineFormat.spokenDayTime(deadline))에 시작해야 해요"
+            // 문구는 화면과 같은 곳에서 만든다. 울리는 시점을 기준으로 「내일」인지 판단한다.
+            let moment = StartMomentText.sentence(
+                startDeadline: startDeadline,
+                effectiveDueAt: effectiveDueAt,
+                now: firesAt,
+                calendar: calendar
+            )
+            return "‘\(title)’\(context) — \(moment)"
         case .start:
             return "‘\(title)’\(context) 지금 시작해야 마감을 맞출 수 있어요"
         case .risk:
