@@ -623,6 +623,7 @@ enum LinkIntegrityTests {
                 testGridTaskPlacement()
                 testRiskAndMissed()
                 testDaysBeforeChips()
+                testEventDeletionText()
                 exit(report.finish())
             }
         } catch {

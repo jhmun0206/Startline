@@ -43,7 +43,7 @@ struct EventEditorView: View {
     @State private var selectedCalendarID: String?
 
     @State private var errorMessage: String?
-    @State private var isConfirmingDelete = false
+    @State private var deletionRequest: EventDeletionRequest?
     /// 반복 일정을 고칠 때 적용 범위를 묻는 중.
     @State private var isConfirmingRecurringSave = false
 
@@ -243,17 +243,14 @@ struct EventEditorView: View {
         } message: {
             Text("반복되는 일정이에요. 이후 회차까지 바꾸면 되돌릴 수 없어요.")
         }
-        .alert(deleteTitle, isPresented: $isConfirmingDelete) {
-            if isRecurring {
-                Button("이 일정만", role: .destructive) { delete(span: .thisEvent) }
-                Button("이후 모든 일정", role: .destructive) { delete(span: .futureEvents) }
-            } else {
-                Button("지우기", role: .destructive) { delete(span: .thisEvent) }
-            }
-            Button("그만두기", role: .cancel) {}
-        } message: {
-            Text(deleteWarning)
-        }
+        // 삭제 확인은 우측 패널과 **같은 부품**을 쓴다. 되돌릴 수 없는 동작이 두 벌로
+        // 갈라지면 한쪽만 고쳐지는 날이 온다.
+        .eventDeletionAlert(
+            $deletionRequest,
+            manager: manager,
+            onDeleted: { dismiss() },
+            onFailure: { errorMessage = $0 }
+        )
     }
 
     /// 시작과 끝을 각각 날짜 + 시각으로 받는다. 여러 날에 걸친 일정을 만들 수 있어야 한다.
@@ -332,7 +329,12 @@ struct EventEditorView: View {
     private var footer: some View {
         HStack {
             if isEditing {
-                Button("삭제", role: .destructive) { isConfirmingDelete = true }
+                Button("삭제", role: .destructive) {
+                    deletionRequest = EventDeletionRequest(
+                        events: deleteTargets,
+                        attachedTaskCount: attachedTaskCount
+                    )
+                }
             }
             Spacer()
             Button(isEditing ? "저장" : "만들기") { save() }
@@ -570,28 +572,6 @@ struct EventEditorView: View {
         return "\(StartlineFormat.spokenDayTime(start)) ~ \(Self.timeFormatter.string(from: end))"
     }
 
-    private var deleteTitle: String {
-        deleteTargets.count > 1 ? "\(deleteTargets.count)개를 함께 지울까요?" : "이 일정을 지울까요?"
-    }
-
-    /// 되돌릴 수 없고 다른 기기까지 번지는 일이라, 무슨 일이 벌어지는지 그대로 적는다.
-    private var deleteWarning: String {
-        var lines = ["‘\(event?.title ?? "")’를 지우면 되돌릴 수 없어요. 연결된 계정과 다른 기기에서도 사라져요."]
-
-        // 한 줄로 보이지만 실제로는 여러 건인 경우. 몇 개가 어디서 사라지는지 밝힌다.
-        if deleteTargets.count > 1 {
-            let names = deleteTargets
-                .map { $0.calendar?.title ?? "(캘린더 없음)" }
-                .joined(separator: " · ")
-            lines.append("이 줄에는 일정 \(deleteTargets.count)개가 묶여 있어요. \(names) 에서 모두 사라져요.")
-        }
-
-        if attachedTaskCount > 0 {
-            lines.append("이 일정에 연결된 할 일 \(attachedTaskCount)개는 삭제되지 않고 남습니다.")
-        }
-        return lines.joined(separator: "\n\n")
-    }
-
     // MARK: - 로드 / 저장 / 삭제
 
     private func load() {
@@ -744,23 +724,6 @@ struct EventEditorView: View {
         }
         draftTasks.removeAll()
         saver.commit(modelContext)
-    }
-
-    private func delete(span: EKSpan) {
-        let targets = deleteTargets
-        guard !targets.isEmpty else { return }
-        errorMessage = nil
-
-        // 묶음 전체를 지운다. 하나라도 실패하면 거기서 멈추고 알린다 —
-        // 조용히 넘어가면 화면에서 사라진 것이 실제로는 남는다. (BL-048)
-        do {
-            for target in targets {
-                try manager.deleteEvent(target, span: span)
-            }
-            dismiss()
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
     }
 
     private static let timeFormatter: DateFormatter = {

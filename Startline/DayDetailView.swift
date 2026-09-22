@@ -36,6 +36,9 @@ struct DayDetailView: View {
     @State private var taskParentPreset: EKEvent?
     /// 부모 일정이 사라져 독립 할 일로 전환된 항목들. (명세서 4.2)
     @State private var detachedNotices: [DetachedTaskNotice] = []
+    @State private var deletionRequest: EventDeletionRequest?
+    /// 일정 삭제가 실패했을 때의 메시지. 조용히 넘기면 사라진 줄 알았던 것이 남는다.
+    @State private var eventErrorMessage: String?
 
     private let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -226,6 +229,24 @@ struct DayDetailView: View {
                 manager: manager
             )
         }
+        // 일정 삭제는 반드시 확인을 거친다. 할 일 삭제(우클릭 → 바로 지움)와 다르게
+        // 동작하는 것은 의도다. 이유는 `eventDeletionAlert` 주석에 있다.
+        .eventDeletionAlert(
+            $deletionRequest,
+            manager: manager,
+            onFailure: { eventErrorMessage = $0 }
+        )
+        .alert(
+            "일정을 지우지 못했어요",
+            isPresented: Binding(
+                get: { eventErrorMessage != nil },
+                set: { if !$0 { eventErrorMessage = nil } }
+            )
+        ) {
+            Button("확인") { eventErrorMessage = nil }
+        } message: {
+            Text(eventErrorMessage ?? "")
+        }
         .alert("연결된 일정을 찾지 못했어요", isPresented: detachedAlertBinding) {
             Button("확인") { detachedNotices = [] }
         } message: {
@@ -286,12 +307,7 @@ struct DayDetailView: View {
 
         if attached.isEmpty {
             PanelCard(inset: CardMetrics.borderGap) {
-                HoverRegion(
-                    onSelect: { selectEvent(keys) },
-                    onOpen: { eventToOpen = dayEvent }
-                ) {
-                    EventRow(dayEvent: dayEvent, day: manager.selectedDate)
-                }
+                eventHeaderRegion(dayEvent, keys: keys, attached: attached)
             }
         } else {
             PanelCard(inset: CardMetrics.borderGap) {
@@ -299,12 +315,7 @@ struct DayDetailView: View {
                 // 커서를 세로로 옮길 때 하이라이트가 끊긴다.
                 // 간격은 위아래 영역의 여백으로 흡수시킨다.
                 VStack(alignment: .leading, spacing: 0) {
-                    HoverRegion(
-                        onSelect: { selectEvent(keys) },
-                        onOpen: { eventToOpen = dayEvent }
-                    ) {
-                        EventRow(dayEvent: dayEvent, day: manager.selectedDate)
-                    }
+                    eventHeaderRegion(dayEvent, keys: keys, attached: attached)
 
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(attached) { resolved in
@@ -328,6 +339,44 @@ struct DayDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// 일정 줄. 한 번 눌러 고르고, 두 번 눌러 편집하고, 우클릭하면 메뉴가 뜬다.
+    ///
+    /// 딸린 할 일이 있든 없든 **같은 것**을 쓴다. 한쪽에만 메뉴가 붙는 일이 없도록.
+    private func eventHeaderRegion(
+        _ dayEvent: DayEvent,
+        keys: [String],
+        attached: [ResolvedTask]
+    ) -> some View {
+        HoverRegion(
+            onSelect: { selectEvent(keys) },
+            onOpen: { eventToOpen = dayEvent }
+        ) {
+            EventRow(dayEvent: dayEvent, day: manager.selectedDate)
+        }
+        .contextMenu { eventMenu(dayEvent, attached: attached) }
+    }
+
+    /// 일정 카드의 우클릭 메뉴. 할 일 행에만 있던 것을 여기에도 맞췄다.
+    ///
+    /// 읽기 전용 캘린더(구독·공휴일 등)는 고칠 수도 지울 수도 없다. 그때는 할 수 있는
+    /// 것만 내놓는다 — 비활성 항목만 뜨는 메뉴는 허탈하고, 아무것도 안 뜨면 고장으로 읽힌다.
+    /// 판정은 `CalendarManager.isEditable(_:)` 을 그대로 쓴다. (「일정 보기」 시트가 쓰는 것)
+    @ViewBuilder
+    private func eventMenu(_ dayEvent: DayEvent, attached: [ResolvedTask]) -> some View {
+        if manager.isEditable(dayEvent.primary) {
+            Button("편집") { eventToOpen = dayEvent }
+            Divider()
+            Button("삭제", role: .destructive) {
+                deletionRequest = EventDeletionRequest(
+                    events: dayEvent.events,
+                    attachedTaskCount: attached.count
+                )
+            }
+        } else {
+            Button("일정 보기") { eventToOpen = dayEvent }
         }
     }
 
