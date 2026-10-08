@@ -177,7 +177,7 @@ nonisolated enum GridTaskPlacement {
 
             // 아래 판정과 그리기는 **그대로 남겨 둔다.** 플래그를 켜면 즉시 돌아온다.
             if showsEcho,
-               resolved.task.status == .notStarted,
+               !resolved.task.isCompleted,
                let startDeadline = resolved.startDeadline,
                startDeadline < now,
                !mainBarShowsInTodayRow,

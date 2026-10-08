@@ -36,6 +36,7 @@ SOURCES=(
   "$ROOT/Tests/DaysBeforeChipsTests.swift"
   "$ROOT/Tests/EventDeletionTextTests.swift"
   "$ROOT/Tests/StartMomentTextTests.swift"
+  "$ROOT/Tests/TaskCompletionTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 
@@ -51,7 +52,10 @@ TARGET="$(uname -m)-apple-macosx14.6"
 # 그래서 진짜 타겟 빌드를 검증 단계에 넣는다. (`--no-app-build` 로 건너뛸 수 있다)
 if [ "${1:-}" != "--no-app-build" ]; then
   echo "앱 타겟 빌드 중…"
+  # 서명 없이 컴파일만 확인한다. 무료 개인 팀 프로파일은 7일이면 만료되어,
+  # 서명까지 요구하면 코드와 무관하게 이 단계가 실패한다.
   if ! xcodebuild -scheme Startline -destination 'platform=macOS' build \
+        CODE_SIGNING_ALLOWED=NO \
         > "$WORK/xcodebuild.log" 2>&1; then
     echo "✗ 앱 빌드 실패"
     grep -E "error:" "$WORK/xcodebuild.log" | sort -u | head -20

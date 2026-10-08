@@ -684,7 +684,7 @@ private struct TaskBar: View {
 
     private var resolved: ResolvedTask { item.resolved }
     private var task: ManagedTask { resolved.task }
-    private var isDone: Bool { task.status == .done }
+    private var isDone: Bool { task.isCompleted }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -1178,7 +1178,7 @@ struct TaskPreviewCard: View {
             // 그리드에서 잘려 보이던 제목을 온전히 보여준다.
             Text(task.title)
                 .font(.headline)
-                .strikethrough(task.status == .done)
+                .strikethrough(task.isCompleted)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let parentTitle = resolved.parentTitle {
@@ -1219,7 +1219,7 @@ struct TaskPreviewCard: View {
             }
 
             HStack(spacing: 6) {
-                if task.status == .done {
+                if task.isCompleted {
                     Text("완료")
                         .font(.caption2.bold())
                         .padding(.horizontal, 6)

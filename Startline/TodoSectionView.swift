@@ -154,7 +154,7 @@ struct TodayStartSection: View {
     }
 
     private var remainingCount: Int {
-        todaysTasks.filter { $0.task.status != .done }.count
+        todaysTasks.filter { !$0.task.isCompleted }.count
     }
 
     private enum State {
@@ -272,8 +272,8 @@ struct TaskRow: View {
             Button {
                 toggleDone()
             } label: {
-                Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(task.status == .done ? Color.accentColor : .secondary)
+                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(task.isCompleted ? Color.accentColor : .secondary)
             }
             .buttonStyle(.borderless)
 
@@ -281,8 +281,8 @@ struct TaskRow: View {
                 HStack(spacing: 6) {
                     Text(showsParentContext ? resolved.contextualTitle : task.title)
                         .font(.body)
-                        .strikethrough(task.status == .done)
-                        .foregroundStyle(task.status == .done ? .secondary : .primary)
+                        .strikethrough(task.isCompleted)
+                        .foregroundStyle(task.isCompleted ? .secondary : .primary)
                         .lineLimit(2)
 
                     Spacer(minLength: 4)
@@ -328,7 +328,7 @@ struct TaskRow: View {
 
     private func toggleDone() {
         saver.perform(modelContext) {
-            if task.status == .done {
+            if task.isCompleted {
                 task.markNotStarted()
             } else {
                 task.markDone()

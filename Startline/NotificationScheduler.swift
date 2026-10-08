@@ -232,8 +232,8 @@ final class NotificationScheduler {
         for resolved in tasks {
             let task = resolved.task
 
-            // 완료·진행 중은 알리지 않는다.
-            guard task.status == .notStarted else { continue }
+            // 끝낸 것만 알리지 않는다. 손만 대 놓은 것(예전의 「진행 중」)도 미완료라 알린다. (BL-066)
+            guard !task.isCompleted else { continue }
             // 리드타임이 없으면 시작 시점 자체가 없다.
             guard let startDeadline = resolved.startDeadline else { continue }
 

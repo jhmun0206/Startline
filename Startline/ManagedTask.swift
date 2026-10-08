@@ -199,6 +199,18 @@ extension ManagedTask {
     /// 일정에 딸린 할 일인지.
     var isAttached: Bool { parentEventID != nil }
 
+    /// 끝냈는지. **할 일의 상태를 묻는 곳은 전부 이것 하나만 본다.** (BL-066)
+    ///
+    /// 할 일은 완료 / 미완료 둘뿐이다. 저장값 `status` 에는 예전의 `inProgress`·`missed` 가
+    /// 남아 있을 수 있는데, 완료가 아니면 모두 미완료로 읽는다.
+    ///
+    /// 예전에는 판정마다 `== .notStarted` 를 따로 봐서, **진행 중으로 바꾼 할 일은 배지도
+    /// 알림도 사라졌다.** 손만 대 놓고 끝내지 못한 일이 조용해지는 버그였다.
+    ///
+    /// **`TaskStatus` 의 케이스를 지우지 말 것.** SwiftData 가 원시 문자열로 저장하고 있어
+    /// 케이스를 지우면 그 값으로 저장된 행을 읽지 못한다.
+    var isCompleted: Bool { status == .done }
+
     /// 실효마감. (명세서 4.2)
     ///
     /// 부모 일정이 있으면 `부모 시작시각 + offsetFromParent`, 없으면 `dueAt`.
@@ -252,7 +264,7 @@ extension ManagedTask {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> StartJudgment? {
-        guard status == .notStarted else { return nil }
+        guard !isCompleted else { return nil }
         guard let deadline = startDeadline(effectiveDueAt: effectiveDueAt, calendar: calendar) else { return nil }
 
         // 착수마감이 지났으면 지연. (명세서 8.1 위험 단계)

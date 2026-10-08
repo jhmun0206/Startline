@@ -132,9 +132,9 @@ func testGridTaskPlacement() {
     report.equal("d) 완료 → 막대 1개", d.count, 1)
     report.check("d) 완료 → 메아리 없음", !d.contains { $0.isEcho })
 
-    // 시작한 것도 메아리를 띄우지 않는다 (조건은 .notStarted 뿐)
+    // 예전의 「진행 중」은 이제 미완료로 읽는다(BL-066). 끝내지 않았으니 메아리 대상이다.
     let started = place(startDeadline: date(2026, 9, 1, 9), dueAt: date(2026, 9, 2, 9), now: date(2026, 9, 9, 12), status: .inProgress)
-    report.check("d') 진행 중 → 메아리 없음", !started.contains { $0.isEcho })
+    report.check("d') 진행 중 → 미완료로 읽어 메아리 있음 (BL-066)", started.contains { $0.isEcho })
 
     // ── e. 주 경계에 걸친 본 막대 — 오늘의 주 행에 일부만 걸친다
     //

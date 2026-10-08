@@ -767,7 +767,7 @@ private struct AttachedTaskRow: View {
 
     /// 완료 여부는 **보여주기만** 한다. 여기서 완료 처리하지 않는다.
     /// 완료 체크는 우측 패널에서 하는 행위다.
-    private var isDone: Bool { edit.task.status == .done }
+    private var isDone: Bool { edit.task.isCompleted }
 
     var body: some View {
         HStack(spacing: 0) {

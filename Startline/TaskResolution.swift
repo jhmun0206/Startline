@@ -48,16 +48,16 @@ nonisolated struct ResolvedTask: Identifiable {
     ///
     /// 완료 여부만 본다. 시작했든 안 했든 마감이 지났으면 놓친 것이다.
     func isMissed(now: Date) -> Bool {
-        guard task.status != .done else { return false }
+        guard !task.isCompleted else { return false }
         guard let effectiveDueAt else { return false }
         return effectiveDueAt < now
     }
 
-    /// 시작할 때가 지났는데 아직 손대지 않았다. (명세서 9.4 「위험」)
+    /// 시작할 때가 지났는데 아직 끝내지 않았다. (명세서 9.4 「위험」)
     ///
     /// **마감까지 지났으면 위험이 아니라 놓침이다.** 그쪽이 맡는다.
     func isAtRisk(now: Date) -> Bool {
-        guard task.status == .notStarted else { return false }
+        guard !task.isCompleted else { return false }
         guard let startDeadline, startDeadline < now else { return false }
         return !isMissed(now: now)
     }
