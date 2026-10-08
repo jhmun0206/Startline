@@ -591,6 +591,47 @@ func persistVerify(store: String, stage: String) throws {
     }
 }
 
+// MARK: - 알림 「완료」 영속성 (kill -9)
+
+let completeTitle = "알림 완료 검증용 할 일"
+
+/// 미완료 할 일 하나를 심어 둔다.
+func completeSeed(store: String, marker: String) throws {
+    let context = ModelContext(try openContainer(at: store))
+    let due = date(2026, 12, 1, 19, 0)
+    context.insert(ManagedTask(title: completeTitle, dueAt: due, estimatedDuration: 3600))
+    try context.save()
+    FileManager.default.createFile(atPath: marker, contents: Data("seeded".utf8))
+    while true { Thread.sleep(forTimeInterval: 0.5) }
+}
+
+/// 앱이 알림 버튼을 받았을 때와 **같은 함수**를 부른다. 미룬 알림의 식별자로 부른다.
+func completeAct(store: String, marker: String) throws {
+    let context = ModelContext(try openContainer(at: store))
+    guard let task = try context.fetch(FetchDescriptor<ManagedTask>()).first(where: { $0.title == completeTitle }) else {
+        print("  ✗ 심어 둔 할 일을 찾지 못함"); exit(1)
+    }
+    let outcome = NotificationCompletion.complete(
+        identifier: "startline|\(task.id.uuidString)|start|snoozed", in: context
+    )
+    guard outcome == .completed(title: completeTitle) else {
+        print("  ✗ 완료 처리 결과: \(outcome)"); exit(1)
+    }
+    FileManager.default.createFile(atPath: marker, contents: Data("completed".utf8))
+    while true { Thread.sleep(forTimeInterval: 0.5) }
+}
+
+func completeVerify(store: String) throws {
+    report.begin("알림 「완료」 직후 kill -9")
+    let context = ModelContext(try openContainer(at: store))
+    guard let task = try context.fetch(FetchDescriptor<ManagedTask>()).first(where: { $0.title == completeTitle }) else {
+        report.check("재실행 시 할 일이 살아 있음", false); return
+    }
+    report.check("재실행 시 할 일이 살아 있음", true)
+    report.check("재실행 — 완료로 저장됨", task.isCompleted)
+    report.check("재실행 — 완료 시각이 남음", task.completedAt != nil)
+}
+
 // MARK: - 진입점
 
 @main
@@ -606,6 +647,16 @@ enum LinkIntegrityTests {
 
             case "--persist-move":
                 try persistMove(store: arguments[1], marker: arguments[2])
+
+            case "--complete-seed":
+                try completeSeed(store: arguments[1], marker: arguments[2])
+
+            case "--complete-act":
+                try completeAct(store: arguments[1], marker: arguments[2])
+
+            case "--complete-verify":
+                try completeVerify(store: arguments[1])
+                exit(report.finish())
 
             case "--persist-verify":
                 try persistVerify(store: arguments[1], stage: arguments[2])
@@ -626,6 +677,7 @@ enum LinkIntegrityTests {
                 testEventDeletionText()
                 testStartMomentText()
                 testTaskCompletion()
+                testAlarms()
                 exit(report.finish())
             }
         } catch {

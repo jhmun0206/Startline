@@ -28,6 +28,7 @@ SOURCES=(
   "$ROOT/Startline/EventDeletion.swift"
   "$ROOT/Startline/StartMomentText.swift"
   "$ROOT/Startline/NotificationScheduler.swift"
+  "$ROOT/Startline/NotificationCompletion.swift"
   "$ROOT/Startline/GridSelection.swift"
   "$ROOT/Startline/GridLayout.swift"
   "$ROOT/Tests/EventGroupingTests.swift"
@@ -37,6 +38,7 @@ SOURCES=(
   "$ROOT/Tests/EventDeletionTextTests.swift"
   "$ROOT/Tests/StartMomentTextTests.swift"
   "$ROOT/Tests/TaskCompletionTests.swift"
+  "$ROOT/Tests/AlarmTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 
@@ -131,6 +133,18 @@ run_then_kill --persist-write "$WORK/wrote" "연결 생성" || PERSIST=1
 
 run_then_kill --persist-move "$WORK/moved" "부모 이동" || PERSIST=1
 "$BIN" --persist-verify "$STORE" "부모 이동" || PERSIST=1
+
+# ── 알림 「완료」 직후 kill -9 ─────────────────────────────────
+#
+# 앱이 꺼진 채 알림 버튼으로 깨어났을 때와 같은 함수(NotificationCompletion)를 부르고,
+# 저장 직후 강제로 죽인다. 다시 열었을 때 완료로 남아 있어야 한다.
+# (운영체제가 꺼진 앱에 버튼 응답을 넘기는 부분은 여기서 재현하지 못한다 — 손으로 확인한다)
+STORE_SAVED="$STORE"
+STORE="$WORK/complete.store"
+run_then_kill --complete-seed "$WORK/c-seeded" "할 일 심기" || PERSIST=1
+run_then_kill --complete-act "$WORK/c-done" "알림 「완료」" || PERSIST=1
+"$BIN" --complete-verify "$STORE" || PERSIST=1
+STORE="$STORE_SAVED"
 
 echo
 echo "════════════════════════════════════════════════════════════"

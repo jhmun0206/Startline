@@ -100,50 +100,6 @@ func testStartMomentText() {
     // 마감 자체가 없으면 같은 날 판정을 할 수 없다 → 날짜만
     report.equal("마감 없음 — 날짜만", short(d1Start, nil), "9월 7일 (월)에 시작")
 
-    // ── 알림 시각 — 표시와 같은 규칙을 탄다
-    report.begin("알림 시각")
-
-    let sameDayMoment = NotificationScheduler.notifyMoment(
-        startDeadline: sameDayStart, effectiveDueAt: sameDayDue, calendar: cal
-    )
-    report.equal("같은 날 — 계산된 시각 그대로", sameDayMoment, sameDayStart)
-
-    let earlyMoment = NotificationScheduler.notifyMoment(
-        startDeadline: todayStart, effectiveDueAt: todayDue, calendar: cal
-    )
-    report.equal("다른 날·새벽 착수 — 그날 아침 9시", earlyMoment, date(2026, 9, 22, 9, 0))
-    report.check("다른 날 — 새벽 4시에 울리지 않는다", earlyMoment != todayStart)
-
-    let lateMoment = NotificationScheduler.notifyMoment(
-        startDeadline: d1Start, effectiveDueAt: d1Due, calendar: cal
-    )
-    report.equal("다른 날·저녁 착수 — 그날 아침 9시", lateMoment, date(2026, 9, 7, 9, 0))
-
-    report.equal("기본 아침 시각은 9시", NotificationScheduler.morningHour, 9)
-
-    // ── 규칙이 덮지 못하는 경우 — 기록해 둔다
-    //
-    // 마감과 **같은 날** 새벽에 떨어지는 착수 시점은 규칙상 시각까지 말한다.
-    // 12시간짜리 작업의 마감이 16:00 이면 착수는 같은 날 04:00 이고, 여전히 「새벽 4시」다.
-    // 요청서가 없애려던 바로 그 모양인데 같은 날이라 걸러지지 않는다.
-    //
-    // **지금은 규칙대로 두고, 이 사실을 여기 못 박아 둔다.** (BL-058)
-    // 고치려면 「같은 날인가」가 아니라 다른 기준이 필요하다.
-    report.begin("규칙이 덮지 못하는 경우 (BL-058)")
-
-    let dawnDue = date(2026, 9, 26, 16, 0)
-    let dawnStart = dawnDue.addingTimeInterval(-12 * 3600)           // 9/26 04:00, 같은 날
-    report.check("12시간·마감 16:00 → 착수가 같은 날 새벽", cal.isDate(dawnStart, inSameDayAs: dawnDue))
-    report.equal(
-        "규칙대로 시각까지 말한다 — 아직 「새벽 4시」다",
-        short(dawnStart, dawnDue),
-        "9월 26일 (토) 새벽 4시에 시작"
-    )
-    report.equal(
-        "알림도 그 시각 그대로다",
-        NotificationScheduler.notifyMoment(
-            startDeadline: dawnStart, effectiveDueAt: dawnDue, calendar: cal
-        ),
-        dawnStart
-    )
+    // 알림 시각 검사는 Tests/AlarmTests.swift 로 옮겼다. 9시 규칙(`notifyMoment`)은
+    // 알림 1단계화(BL-067)로 걷어냈다. 이 파일은 화면 표시 문구만 본다.
 }

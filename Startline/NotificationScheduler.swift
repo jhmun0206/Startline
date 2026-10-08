@@ -2,7 +2,8 @@
 //  NotificationScheduler.swift
 //  Startline
 //
-//  명세서 9장 — 알림 3단계 + 롤링 스케줄러.
+//  할 일 알림 — 할 일당 하나, 마감 − 사용자가 고른 오프셋. + 롤링 스케줄러.
+//  (docs/DESIGN_direction.md · BL-067)
 //
 //  이 앱이 존재하는 이유는 "앱을 안 열어봐서 놓치는 것"을 막는 데 있다.
 //  화면에 표시만 해서는 앱을 열어야 보이므로 아무것도 해결되지 않는다. (명세서 9.4)
@@ -13,37 +14,32 @@ import Observation
 import SwiftData
 import UserNotifications
 
-// MARK: - 단계
-
-/// 명세서 9.1 3단계.
-enum StartStage: String, CaseIterable {
-    /// 하루 전 — 정보.
-    case advance
-    /// 시작해야 하는 시점 — 행동 촉구.
-    case start
-    /// 시점이 지남 — 경고.
-    case risk
-}
+// MARK: - 예약 대상
 
 /// 예약 대상 하나. 실제 등록 전 단계라 순수 값으로 다룬다.
+///
+/// **할 일당 알림은 하나다.** 예전에는 예고(−1일) / 착수 / 위험(+1시간) 3단계였다. (BL-067)
+/// 예고는 사용자가 「1일 전」을 고르면 되고, 위험 단계는 개념이 틀려 철회했다(BL-031).
 nonisolated struct PlannedNotification: Equatable {
     let taskID: UUID
-    let stage: StartStage
     let fireDate: Date
     let title: String
     let body: String
 
-    var identifier: String { "startline|\(taskID.uuidString)|\(stage.rawValue)" }
+    /// 식별자 꼬리. 형식 「startline|<할 일 ID>|start」는 예전과 같게 둔다.
+    static let kind = "start"
 
-    /// 알림 식별자에서 되찾는다. 앱이 꺼져 있다가 액션으로 깨어날 때 쓴다.
-    static func parse(identifier: String) -> (taskID: UUID, stage: StartStage)? {
+    var identifier: String { "startline|\(taskID.uuidString)|\(Self.kind)" }
+
+    /// 알림 식별자에서 할 일 ID 를 되찾는다. 앱이 꺼져 있다가 액션으로 깨어날 때 쓴다.
+    ///
+    /// **꼬리를 따지지 않는다.** 이미 알림 센터에 떠 있는 예전 단계 알림(`|advance`·`|risk`)과
+    /// 「30분 미루기」로 다시 온 알림(`|start|snoozed`)에서도 버튼이 동작해야 한다.
+    /// 예전에는 정확히 세 조각만 받아서, **미룬 알림에서 버튼을 누르면 아무 일도 일어나지 않았다.**
+    static func taskID(from identifier: String) -> UUID? {
         let parts = identifier.split(separator: "|")
-        guard parts.count == 3,
-              parts[0] == "startline",
-              let id = UUID(uuidString: String(parts[1])),
-              let stage = StartStage(rawValue: String(parts[2]))
-        else { return nil }
-        return (id, stage)
+        guard parts.count >= 3, parts[0] == "startline" else { return nil }
+        return UUID(uuidString: String(parts[1]))
     }
 }
 
@@ -58,20 +54,9 @@ final class NotificationScheduler {
     nonisolated static let scheduleLimit = 60
 
     nonisolated static let categoryID = "startline.task"
-    nonisolated static let startNowAction = "startline.startNow"
+    /// 알림에서 바로 끝냈다고 표시한다. 예전의 「지금 시작」(진행 중으로 바꾸던 것)을 대신한다. (BL-066)
+    nonisolated static let completeAction = "startline.complete"
     nonisolated static let snoozeAction = "startline.snooze30"
-
-    /// 「시작」 시점이 지난 뒤 「위험」을 언제 알릴지.
-    /// 명세서는 "경과"라고만 하므로 잠정값이다. (BL-031)
-    nonisolated static let riskDelay: TimeInterval = 60 * 60
-
-    /// 날짜까지만 말하는 일을 **그날 몇 시에** 알릴지.
-    ///
-    /// `착수일 = 마감시각 − 소요시간` 을 그대로 쓰면 12시간짜리 작업이 새벽 4시에 울린다.
-    /// 표시만 날짜로 바꾸고 알림을 그 시각에 보내면 문제는 그대로 남는다.
-    ///
-    /// **설정 화면이 생기면 여기를 사용자 값으로 뺀다.** (BL-057)
-    nonisolated static let morningHour = 9
 
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// 실제로 예약된 개수.
@@ -104,10 +89,11 @@ final class NotificationScheduler {
 
     /// 알림에 붙는 액션들을 등록한다. 앱 시작 때 한 번 부른다.
     func registerCategories() {
-        let startNow = UNNotificationAction(
-            identifier: Self.startNowAction,
-            title: "지금 시작",
-            options: [.foreground]
+        // 앞으로 띄우지 않는다. 버튼 하나로 끝내는 것이 이 버튼의 목적이다.
+        let complete = UNNotificationAction(
+            identifier: Self.completeAction,
+            title: "완료",
+            options: []
         )
         let snooze = UNNotificationAction(
             identifier: Self.snoozeAction,
@@ -116,7 +102,7 @@ final class NotificationScheduler {
         )
         let category = UNNotificationCategory(
             identifier: Self.categoryID,
-            actions: [startNow, snooze],
+            actions: [complete, snooze],
             intentIdentifiers: [],
             options: []
         )
@@ -196,8 +182,8 @@ final class NotificationScheduler {
     /// 검증용 — 지정한 초 뒤에 한 번 울린다.
     func scheduleTestNotification(after seconds: TimeInterval = 60) async {
         let content = UNMutableNotificationContent()
-        content.title = "지금 시작할 시간이에요"
-        content.body = "‘알림 확인용’ 지금 시작해야 마감을 맞출 수 있어요"
+        content.title = Self.headline
+        content.body = "‘알림 확인용’ — 마감 확인용"
         content.sound = .default
         content.categoryIdentifier = Self.categoryID
 
@@ -217,10 +203,9 @@ final class NotificationScheduler {
     ///
     /// 부수효과가 없어 알림 권한 없이도 검증할 수 있다. 그래서 액터 격리에서 빼 둔다.
     ///
-    /// 제외 대상:
-    /// - 이미 시작했거나 완료한 할 일 (「지금 시작」을 눌렀다면 더 조를 이유가 없다)
-    /// - 시작 시점이 없는 할 일 (리드타임 없음, 소요시간 미입력)
-    /// - 이미 지나간 시각 — 지난 시각은 예약해도 울리지 않는다
+    /// **알림 시각 = 마감 − 사용자가 고른 오프셋. 앱이 보정하지 않는다.** (BL-067)
+    /// 예전에는 마감과 다른 날이면 그날 아침 9시로 옮겼다. 사용자가 고른 시각에 울리면 되므로
+    /// 그 규칙(`notifyMoment`)을 걷어냈다.
     nonisolated static func plan(
         for tasks: [ResolvedTask],
         now: Date = Date(),
@@ -234,44 +219,24 @@ final class NotificationScheduler {
 
             // 끝낸 것만 알리지 않는다. 손만 대 놓은 것(예전의 「진행 중」)도 미완료라 알린다. (BL-066)
             guard !task.isCompleted else { continue }
-            // 리드타임이 없으면 시작 시점 자체가 없다.
-            guard let startDeadline = resolved.startDeadline else { continue }
+            // 「알림 없음」이면 시점 자체가 없다.
+            guard let fireDate = resolved.startDeadline else { continue }
+            // 지난 시각은 예약해도 울리지 않는다.
+            guard fireDate > now else { continue }
 
-            // 알림 시각은 표시와 같은 규칙을 탄다. 날짜까지만 말하는 일은 그날 아침에 울린다.
-            let deadline = notifyMoment(
-                startDeadline: startDeadline,
-                effectiveDueAt: resolved.effectiveDueAt,
-                calendar: calendar
-            )
-
-            let title = task.title
-            let context = resolved.parentTitle.map { " (\($0))" } ?? ""
-
-            for stage in StartStage.allCases {
-                guard let fireDate = fireDate(for: stage, deadline: deadline, calendar: calendar)
-                else { continue }
-                // 지난 시각은 예약해도 울리지 않는다.
-                // 「시작」이 지났어도 「위험」이 아직 안 왔으면 그것만 남는다.
-                guard fireDate > now else { continue }
-
-                planned.append(
-                    PlannedNotification(
-                        taskID: task.id,
-                        stage: stage,
-                        fireDate: fireDate,
-                        title: headline(for: stage),
-                        body: message(
-                            for: stage,
-                            title: title,
-                            context: context,
-                            startDeadline: startDeadline,
-                            effectiveDueAt: resolved.effectiveDueAt,
-                            firesAt: fireDate,
-                            calendar: calendar
-                        )
+            planned.append(
+                PlannedNotification(
+                    taskID: task.id,
+                    fireDate: fireDate,
+                    title: headline,
+                    body: message(
+                        title: task.title,
+                        parentTitle: resolved.parentTitle,
+                        effectiveDueAt: resolved.effectiveDueAt,
+                        calendar: calendar
                     )
                 )
-            }
+            )
         }
 
         planned.sort { lhs, rhs in
@@ -282,73 +247,23 @@ final class NotificationScheduler {
         return limit == .max ? planned : Array(planned.prefix(limit))
     }
 
-    /// 알림이 기준으로 삼는 시점.
+    // MARK: - 문구 (원칙 4 — 내부 용어를 쓰지 않는다)
+
+    nonisolated static let headline = "시작할 시간이에요"
+
+    /// 「‘보고서 초안’ ([졸프] 전체 미팅) — 마감 10월 11일 (토) 저녁 7시」
     ///
-    /// 화면 표시와 **같은 규칙**을 쓴다. (`StartMomentText`)
-    /// 마감과 같은 날이면 계산된 시각 그대로, 다른 날이면 **그날 아침 `morningHour` 시**다.
-    /// 표시는 날짜까지만 말하면서 알림은 새벽에 보내면 고친 것이 아니다.
-    nonisolated static func notifyMoment(
-        startDeadline: Date,
-        effectiveDueAt: Date?,
-        calendar: Calendar = .current
-    ) -> Date {
-        if let effectiveDueAt,
-           calendar.isDate(startDeadline, inSameDayAs: effectiveDueAt) {
-            return startDeadline
-        }
-        return calendar.date(
-            bySettingHour: morningHour, minute: 0, second: 0, of: startDeadline
-        ) ?? startDeadline
-    }
-
-    nonisolated static func fireDate(
-        for stage: StartStage,
-        deadline: Date,
-        calendar: Calendar = .current
-    ) -> Date? {
-        switch stage {
-        case .advance:
-            return calendar.date(byAdding: .day, value: -1, to: deadline)
-        case .start:
-            return deadline
-        case .risk:
-            return deadline.addingTimeInterval(riskDelay)
-        }
-    }
-
-    // MARK: - 문구 (원칙 4 — "착수" 같은 내부 용어를 쓰지 않는다)
-
-    nonisolated static func headline(for stage: StartStage) -> String {
-        switch stage {
-        case .advance: return "내일 시작할 일이 있어요"
-        case .start: return "지금 시작할 시간이에요"
-        case .risk: return "시작 시간이 지났어요"
-        }
-    }
-
+    /// 예전 문구 「지금 시작해야 마감을 맞출 수 있어요」는 앱이 소요시간을 알고 계산했을 때의 말이다.
+    /// 지금은 사용자가 고른 시점에 울릴 뿐이라 그 주장을 할 수 없다. **사실(마감)만 말한다.**
+    /// 마감은 사용자가 입력한 값이라 그대로 적는다. (원칙 1)
     nonisolated static func message(
-        for stage: StartStage,
         title: String,
-        context: String,
-        startDeadline: Date,
+        parentTitle: String?,
         effectiveDueAt: Date?,
-        firesAt: Date,
         calendar: Calendar = .current
     ) -> String {
-        switch stage {
-        case .advance:
-            // 문구는 화면과 같은 곳에서 만든다. 울리는 시점을 기준으로 「내일」인지 판단한다.
-            let moment = StartMomentText.sentence(
-                startDeadline: startDeadline,
-                effectiveDueAt: effectiveDueAt,
-                now: firesAt,
-                calendar: calendar
-            )
-            return "‘\(title)’\(context) — \(moment)"
-        case .start:
-            return "‘\(title)’\(context) 지금 시작해야 마감을 맞출 수 있어요"
-        case .risk:
-            return "‘\(title)’\(context) 아직 시작하지 않았어요. 일정을 다시 잡아볼까요?"
-        }
+        let context = parentTitle.map { " (\($0))" } ?? ""
+        guard let effectiveDueAt else { return "‘\(title)’\(context)" }
+        return "‘\(title)’\(context) — 마감 \(StartlineFormat.spokenDayTime(effectiveDueAt, calendar: calendar))"
     }
 }

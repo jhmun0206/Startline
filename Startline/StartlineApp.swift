@@ -124,8 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let content = response.notification.request.content
 
         switch response.actionIdentifier {
-        case NotificationScheduler.startNowAction:
-            await markStarted(identifier: identifier, content: content)
+        case NotificationScheduler.completeAction:
+            completeTask(identifier: identifier)
 
         case NotificationScheduler.snoozeAction:
             await Self.scheduler.snooze(
@@ -139,26 +139,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    /// 「지금 시작」 — status = .inProgress, startedAt = now.
-    /// 이 기록이 명세서 10장 캘리브레이션의 입력이 된다.
+    /// 알림의 「완료」. **앱이 꺼져 있다가 이 버튼으로 깨어나도 저장돼야 한다.**
     @MainActor
-    private func markStarted(identifier: String, content: UNNotificationContent) async {
-        guard let parsed = PlannedNotification.parse(identifier: identifier) else { return }
-
+    private func completeTask(identifier: String) {
         let context = StartlineStore.container.mainContext
-        let targetID = parsed.taskID
-        let descriptor = FetchDescriptor<ManagedTask>(
-            predicate: #Predicate { $0.id == targetID }
-        )
-
-        guard let task = try? context.fetch(descriptor).first else { return }
-        task.markStarted()
-
-        do {
-            try context.save()
-            NSLog("[Startline] 알림에서 「지금 시작」 처리: \(task.title)")
-        } catch {
-            NSLog("[Startline] 「지금 시작」 저장 실패: \(error.localizedDescription)")
+        switch NotificationCompletion.complete(identifier: identifier, in: context) {
+        case .completed(let title):
+            NSLog("[Startline] 알림에서 「완료」 처리: \(title)")
+        case .notFound:
+            NSLog("[Startline] 「완료」 — 할 일을 찾지 못했다: \(identifier)")
+        case .saveFailed(let message):
+            NSLog("[Startline] 「완료」 저장 실패: \(message)")
         }
     }
+
 }
