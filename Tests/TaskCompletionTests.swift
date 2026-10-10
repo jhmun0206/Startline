@@ -65,4 +65,39 @@ func testTaskCompletion() {
         for: [make(.done, due: alarmDue)], now: now, limit: .max, calendar: cal
     )
     report.check("완료 — 알림 없음", donePlanned.isEmpty)
+
+    // ── 「늦음」 배지는 마감이 지난 뒤에만 (BL-066)
+    report.begin("배지 — 「늦음」은 마감 뒤에만")
+
+    func judge(due: Date, lead: LeadTime, status: TaskStatus = .notStarted) -> StartJudgment? {
+        let t = ManagedTask(title: "j", dueAt: due, leadTime: lead)
+        t.status = status
+        return t.judgment(effectiveDueAt: due, now: now, calendar: cal)
+    }
+
+    // 알림은 이미 울렸지만 마감 전 → 「늦음」이 아니다. 예전에는 여기서 「늦음」이 붙었다.
+    report.equal("알림 지남·마감 전 → 오늘 시작", judge(due: date(2026, 10, 9, 19, 0), lead: .fixed(days: 3)), .startToday)
+    report.equal("마감 지남 → 늦음", judge(due: date(2026, 10, 8, 9, 0), lead: .fixed(days: 1)), .overdue)
+    report.equal("알림 없음·마감 지남 → 늦음", judge(due: date(2026, 10, 7, 9, 0), lead: .none), .overdue)
+    report.check("알림 없음·마감 전 → 배지 없음", judge(due: date(2026, 10, 20, 9, 0), lead: .none) == nil)
+    report.equal("알림이 오늘 저녁 → 오늘 시작", judge(due: date(2026, 10, 9, 18, 0), lead: .fixed(days: 1)), .startToday)
+    report.equal("알림이 내일 → 여유", judge(due: date(2026, 10, 11, 19, 0), lead: .fixed(days: 1)), .relaxed)
+    report.check("완료 → 배지 없음", judge(due: date(2026, 10, 8, 9, 0), lead: .fixed(days: 1), status: .done) == nil)
+    report.equal("예전 진행 중·마감 지남 → 늦음", judge(due: date(2026, 10, 8, 9, 0), lead: .fixed(days: 1), status: .inProgress), .overdue)
+
+    // 「늦음」과 「기한 지난 할 일」이 같은 규칙인지
+    for due in [date(2026, 10, 8, 11, 59), date(2026, 10, 8, 12, 1)] {
+        let t = ManagedTask(title: "k", dueAt: due, leadTime: .fixed(days: 1))
+        let r = ResolvedTask(task: t, effectiveDueAt: due, startDeadline: t.startDeadline(effectiveDueAt: due, calendar: cal),
+                             judgment: t.judgment(effectiveDueAt: due, now: now, calendar: cal), parentTitle: nil, parentStart: nil)
+        report.equal("「늦음」 ⇔ 기한 지남 (\(due))", r.judgment == .overdue, r.isMissed(now: now))
+    }
+
+    // ── 미완료로 되돌려도 예전 시작 기록은 남는다
+    let kept = ManagedTask(title: "s", dueAt: now)
+    kept.startedAt = date(2026, 10, 1, 9, 0)
+    kept.markDone()
+    kept.markNotStarted()
+    report.equal("미완료로 되돌려도 startedAt 보존", kept.startedAt, date(2026, 10, 1, 9, 0))
+    report.check("미완료로 되돌리면 완료 시각은 지움", kept.completedAt == nil)
 }

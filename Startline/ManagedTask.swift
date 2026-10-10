@@ -265,12 +265,16 @@ extension ManagedTask {
         calendar: Calendar = .current
     ) -> StartJudgment? {
         guard !isCompleted else { return nil }
-        guard let deadline = startDeadline(effectiveDueAt: effectiveDueAt, calendar: calendar) else { return nil }
 
-        // 착수마감이 지났으면 지연. (명세서 8.1 위험 단계)
-        if now > deadline { return .overdue }
-        // 오늘이 착수마감이면 오늘 착수. (명세서 8.1 착수 단계)
-        if calendar.isDate(deadline, inSameDayAs: now) { return .startToday }
+        // 「늦음」은 **마감이 지난 뒤에만** 붙는다. 「기한 지난 할 일」(isMissed)과 같은 규칙이다.
+        // 예전에는 시작 시점이 지나면 붙어서, 「1일 전」 알림이 울린 뒤 마감 전인데도 「늦음」이었다.
+        // 알림이 없는 할 일도 마감이 지나면 늦은 것이다. 그래서 알림 시점보다 먼저 본다.
+        if let effectiveDueAt, effectiveDueAt < now { return .overdue }
+
+        guard let alarm = startDeadline(effectiveDueAt: effectiveDueAt, calendar: calendar) else { return nil }
+
+        // 알림이 오늘이거나 이미 울렸으면 「오늘 시작」. 배너가 「오늘 몫」으로 세는 것과 같다.
+        if alarm <= now || calendar.isDate(alarm, inSameDayAs: now) { return .startToday }
         return .relaxed
     }
 
@@ -281,20 +285,17 @@ extension ManagedTask {
     // MARK: - 상태 전이
 
     /// "지금 시작" — 이 기록이 명세서 9장 캘리브레이션의 입력이 된다.
-    func markStarted(at date: Date = Date()) {
-        guard status == .notStarted || status == .missed else { return }
-        status = .inProgress
-        startedAt = date
-    }
 
     func markDone(at date: Date = Date()) {
         status = .done
         completedAt = date
     }
 
+    /// 미완료로 되돌린다.
+    ///
+    /// `startedAt` 은 건드리지 않는다. 예전 「지금 시작」이 남긴 기록이라 보존한다. (BL-066)
     func markNotStarted() {
         status = .notStarted
-        startedAt = nil
         completedAt = nil
     }
 

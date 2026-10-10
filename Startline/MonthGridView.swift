@@ -1226,13 +1226,6 @@ struct TaskPreviewCard: View {
                         .padding(.vertical, 2)
                         .background(Color.secondary.opacity(0.18), in: Capsule())
                         .foregroundStyle(.secondary)
-                } else if task.status == .inProgress {
-                    Text(TaskStatus.inProgress.label)
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.18), in: Capsule())
-                        .foregroundStyle(Color.accentColor)
                 } else if let judgment = resolved.judgment {
                     JudgmentBadge(judgment: judgment)
                 }

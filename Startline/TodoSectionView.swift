@@ -287,14 +287,7 @@ struct TaskRow: View {
 
                     Spacer(minLength: 4)
 
-                    if task.status == .inProgress {
-                        Text(TaskStatus.inProgress.label)
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.18), in: Capsule())
-                            .foregroundStyle(Color.accentColor)
-                    } else if let judgment = resolved.judgment {
+                    if let judgment = resolved.judgment {
                         JudgmentBadge(judgment: judgment)
                     }
                 }
@@ -309,17 +302,9 @@ struct TaskRow: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
-            if task.status == .notStarted {
-                // 명세서 9.1 — 이 기록이 10장 캘리브레이션의 입력이 된다.
-                Button("지금 시작") {
-                    saver.perform(modelContext) { task.markStarted() }
-                }
-            }
-            if task.status != .notStarted {
-                Button("미시작으로 되돌리기") {
-                    saver.perform(modelContext) { task.markNotStarted() }
-                }
-            }
+            // 할 일은 완료 / 미완료 둘뿐이다. (BL-066)
+            // 예전의 「지금 시작」(진행 중으로 바꾸기)·「미시작으로 되돌리기」를 이것 하나로 바꿨다.
+            Button(task.isCompleted ? "미완료로 되돌리기" : "완료", action: toggleDone)
             Button("편집", action: onEdit)
             Divider()
             Button("삭제", role: .destructive, action: onDelete)
