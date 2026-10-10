@@ -39,6 +39,7 @@ SOURCES=(
   "$ROOT/Tests/StartMomentTextTests.swift"
   "$ROOT/Tests/TaskCompletionTests.swift"
   "$ROOT/Tests/AlarmTests.swift"
+  "$ROOT/Tests/SnoozeTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 
@@ -144,7 +145,27 @@ STORE="$WORK/complete.store"
 run_then_kill --complete-seed "$WORK/c-seeded" "할 일 심기" || PERSIST=1
 run_then_kill --complete-act "$WORK/c-done" "알림 「완료」" || PERSIST=1
 "$BIN" --complete-verify "$STORE" || PERSIST=1
+
+# ── 「30분 미루기」 직후 kill -9 ──────────────────────────────
+STORE="$WORK/snooze.store"
+run_then_kill --snooze-seed "$WORK/s-seeded" "할 일 심기" || PERSIST=1
+run_then_kill --snooze-act "$WORK/s-done" "30분 미루기" || PERSIST=1
+"$BIN" --snooze-verify "$STORE" || PERSIST=1
 STORE="$STORE_SAVED"
+
+# ── 스키마 이전 — 실제 스토어의 사본으로 ─────────────────────────
+#
+# 실제 스토어는 건드리지 않는다. 세 파일(.store/-shm/-wal)을 함께 복사해 그 사본만 연다.
+# -wal 에 최신 내용이 있어, 본 파일만 복사하면 할 일이 빠진다.
+LIVE="$HOME/Library/Group Containers/group.com.ericmun.startline/Startline.store"
+if [ -f "$LIVE" ]; then
+  COPY="$WORK/migrate.store"
+  cp "$LIVE" "$COPY"
+  [ -f "$LIVE-wal" ] && cp "$LIVE-wal" "$COPY-wal"
+  [ -f "$LIVE-shm" ] && cp "$LIVE-shm" "$COPY-shm"
+  EXPECTED=$(sqlite3 -readonly "$COPY" "SELECT COUNT(*) FROM ZMANAGEDTASK;")
+  "$BIN" --migrate-check "$COPY" "$EXPECTED" || PERSIST=1
+fi
 
 echo
 echo "════════════════════════════════════════════════════════════"

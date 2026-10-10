@@ -258,10 +258,25 @@ struct TaskRow: View {
     /// 「할 일」 섹션에서는 부모 일정명을 함께 보여준다.
     /// 부모 카드 아래에서는 이미 맥락이 있으므로 붙이지 않는다.
     var showsParentContext = false
+    /// 「30분 미뤄짐」 줄이 언제 사라질지 가르는 기준 시각. 패널의 1분 시계를 받는다.
+    var now: Date = Date()
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     private var task: ManagedTask { resolved.task }
+
+    /// 미뤄서 다시 울릴 시각. 지났거나 완료했으면 `nil` — 줄이 사라진다. (BL-072)
+    private var pendingSnooze: Date? {
+        guard !task.isCompleted, let until = task.snoozedUntil, until > now else { return nil }
+        return until
+    }
+
+    private static let snoozeTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .startlineDisplay
+        f.dateFormat = "a h:mm"
+        return f
+    }()
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
@@ -295,6 +310,16 @@ struct TaskRow: View {
                 Text(detailText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // 미룬 걸 화면에서 알 수 있어야 한다. 알림에서만 보이면 잊는다.
+                if let pendingSnooze {
+                    Label(
+                        "30분 미뤄짐 · \(Self.snoozeTimeFormatter.string(from: pendingSnooze))에 다시 알림",
+                        systemImage: "clock.arrow.circlepath"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
             // 체크박스는 제외하고 본문만 눌러야 수정 시트가 열린다.
             .contentShape(Rectangle())

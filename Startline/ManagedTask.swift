@@ -117,6 +117,14 @@ final class ManagedTask {
     var status: TaskStatus = TaskStatus.notStarted
     var startedAt: Date?
     var completedAt: Date?
+    /// 알림 「30분 미루기」로 다시 울릴 시각. 미루지 않았으면 `nil`.
+    ///
+    /// 예전에는 미룬 사실을 저장하지 않아, 앱에서 무엇이든 저장해 알림을 다시 예약하면
+    /// **미룬 알림이 지워졌다.** (BL-072) 이 값이 미래면 스케줄러가 원래 알림 시각 대신 이 시각에 예약한다.
+    /// 미룬 **횟수**는 저장하지 않는다 (BL-032 폐기).
+    ///
+    /// 선택형 필드라 SwiftData 가 가벼운 이전으로 붙인다. 기존 행은 `nil` 로 읽힌다.
+    var snoozedUntil: Date?
     var createdAt: Date = Date()
 
     /// 독립 할 일.
@@ -289,6 +297,39 @@ extension ManagedTask {
     func markDone(at date: Date = Date()) {
         status = .done
         completedAt = date
+        // 끝낸 일을 다시 알릴 이유가 없다.
+        snoozedUntil = nil
+    }
+
+    /// 알림 시각을 정하는 입력들. 사용자가 이것을 바꿨는지 가르는 데 쓴다.
+    ///
+    /// 딸린 할 일은 부모 기준 상대값(`offsetFromParent`)이 입력이고 `dueAt` 은 계산된 사본이라 보지 않는다.
+    /// 사본은 부모가 옮겨질 때도 바뀌므로, 그것까지 보면 사용자가 손대지 않았는데 미룸이 지워진다.
+    nonisolated struct AlarmInputs: Equatable {
+        let due: Date?
+        let parentEventID: String?
+        let parentOccurrenceDate: Date?
+        let offsetFromParent: TimeInterval?
+        let leadTimeKind: LeadTimeKind
+        let leadTimeValue: Int
+        let estimatedDuration: TimeInterval?
+    }
+
+    var alarmInputs: AlarmInputs {
+        AlarmInputs(
+            due: isAttached ? nil : dueAt,
+            parentEventID: parentEventID,
+            parentOccurrenceDate: parentOccurrenceDate,
+            offsetFromParent: offsetFromParent,
+            leadTimeKind: leadTimeKind,
+            leadTimeValue: leadTimeValue,
+            estimatedDuration: estimatedDuration
+        )
+    }
+
+    /// 사용자가 마감이나 알림을 바꿨으면 미룸을 지운다. 바뀐 알림 시각에 맞춰 새로 울린다. (BL-072)
+    func clearSnoozeIfAlarmChanged(from before: AlarmInputs) {
+        if alarmInputs != before { snoozedUntil = nil }
     }
 
     /// 미완료로 되돌린다.

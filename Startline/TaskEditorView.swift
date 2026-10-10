@@ -476,6 +476,8 @@ struct TaskEditorView: View {
         guard !trimmed.isEmpty else { return }
 
         if let task {
+            let alarmBefore = task.alarmInputs
+            defer { task.clearSnoozeIfAlarmChanged(from: alarmBefore) }
             task.title = trimmed
             // 사용자 입력값을 그대로 저장한다. 배수를 곱하지 않는다. (원칙 1)
             task.estimatedDuration = estimatedDuration

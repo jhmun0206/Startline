@@ -529,6 +529,8 @@ struct EventEditorView: View {
         }
 
         for edit in linkedEdits where edit.isChanged {
+            let alarmBefore = edit.task.alarmInputs
+            defer { edit.task.clearSnoozeIfAlarmChanged(from: alarmBefore) }
             let trimmed = edit.title.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { edit.task.title = trimmed }
 

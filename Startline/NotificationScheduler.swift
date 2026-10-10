@@ -162,7 +162,10 @@ final class NotificationScheduler {
         NSLog("[Startline] 알림 예약 \(registered)개 / 후보 \(all.count)개 (한도 \(Self.scheduleLimit))")
     }
 
-    /// 30분 뒤로 미룬다.
+    /// 미룬 알림을 시스템에 넣는다.
+    ///
+    /// 할 일의 알림이면 **원래 식별자 그대로** 넣는다. 다시 예약할 때 같은 식별자로 덮이므로
+    /// 둘이 겹치지 않는다. 할 일과 무관한 알림(확인용)만 예전처럼 꼬리를 붙인다.
     func snooze(_ identifier: String, title: String, body: String) async {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -170,9 +173,10 @@ final class NotificationScheduler {
         content.sound = .default
         content.categoryIdentifier = Self.categoryID
 
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 30 * 60, repeats: false)
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: NotificationSnooze.interval, repeats: false)
+        let isTaskAlarm = PlannedNotification.taskID(from: identifier) != nil
         let request = UNNotificationRequest(
-            identifier: identifier + "|snoozed",
+            identifier: isTaskAlarm ? identifier : identifier + "|snoozed",
             content: content,
             trigger: trigger
         )
@@ -219,8 +223,11 @@ final class NotificationScheduler {
 
             // 끝낸 것만 알리지 않는다. 손만 대 놓은 것(예전의 「진행 중」)도 미완료라 알린다. (BL-066)
             guard !task.isCompleted else { continue }
+            // 미뤘으면 그 시각에 다시 울린다. 원래 알림 시각 대신이다. (BL-072)
+            // 지난 미룸은 무시하고 원래 시각을 본다.
+            let snoozed = task.snoozedUntil.flatMap { $0 > now ? $0 : nil }
             // 「알림 없음」이면 시점 자체가 없다.
-            guard let fireDate = resolved.startDeadline else { continue }
+            guard let fireDate = snoozed ?? resolved.startDeadline else { continue }
             // 지난 시각은 예약해도 울리지 않는다.
             guard fireDate > now else { continue }
 

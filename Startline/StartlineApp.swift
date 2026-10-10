@@ -128,6 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             completeTask(identifier: identifier)
 
         case NotificationScheduler.snoozeAction:
+            // 미룬 시각을 먼저 저장한다. 그래야 앱이 다시 예약해도 미룬 알림이 남는다. (BL-072)
+            await MainActor.run {
+                _ = NotificationSnooze.snooze(
+                    identifier: identifier, in: StartlineStore.container.mainContext
+                )
+            }
             await Self.scheduler.snooze(
                 identifier,
                 title: content.title,

@@ -326,7 +326,8 @@ struct DayDetailView: View {
                                 TaskRow(
                                     resolved: resolved,
                                     isNested: true,
-                                    onEdit: { editingTask = resolved.task },
+                                    now: now,
+                            onEdit: { editingTask = resolved.task },
                                     onDelete: { delete(resolved) }
                                 )
                             }
@@ -406,6 +407,7 @@ struct DayDetailView: View {
                         TaskRow(
                             resolved: resolved,
                             showsParentContext: true,
+                            now: now,
                             onEdit: { editingTask = resolved.task },
                             onDelete: { delete(resolved) }
                         )
@@ -435,6 +437,7 @@ struct DayDetailView: View {
                             resolved: resolved,
                             showsMissedDeadline: true,
                             showsParentContext: true,
+                            now: now,
                             onEdit: { editingTask = resolved.task },
                             onDelete: { delete(resolved) }
                         )

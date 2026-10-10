@@ -632,6 +632,56 @@ func completeVerify(store: String) throws {
     report.check("재실행 — 완료 시각이 남음", task.completedAt != nil)
 }
 
+// MARK: - 「30분 미루기」 영속성 (kill -9)
+
+let snoozeTitle = "미루기 검증용 할 일"
+
+func snoozeSeed(store: String, marker: String) throws {
+    let context = ModelContext(try openContainer(at: store))
+    context.insert(ManagedTask(title: snoozeTitle, dueAt: date(2026, 12, 3, 19, 0), leadTime: .fixed(days: 1)))
+    try context.save()
+    FileManager.default.createFile(atPath: marker, contents: Data("seeded".utf8))
+    while true { Thread.sleep(forTimeInterval: 0.5) }
+}
+
+/// 앱이 「30분 미루기」를 받았을 때와 같은 함수.
+func snoozeAct(store: String, marker: String) throws {
+    let context = ModelContext(try openContainer(at: store))
+    guard let task = try context.fetch(FetchDescriptor<ManagedTask>()).first(where: { $0.title == snoozeTitle }) else {
+        print("  ✗ 심어 둔 할 일을 찾지 못함"); exit(1)
+    }
+    guard NotificationSnooze.snooze(identifier: "startline|\(task.id.uuidString)|start", in: context,
+                                    now: date(2026, 12, 2, 11, 24)) != nil else {
+        print("  ✗ 미루기 실패"); exit(1)
+    }
+    FileManager.default.createFile(atPath: marker, contents: Data("snoozed".utf8))
+    while true { Thread.sleep(forTimeInterval: 0.5) }
+}
+
+func snoozeVerify(store: String) throws {
+    report.begin("「30분 미루기」 직후 kill -9")
+    let context = ModelContext(try openContainer(at: store))
+    guard let task = try context.fetch(FetchDescriptor<ManagedTask>()).first(where: { $0.title == snoozeTitle }) else {
+        report.check("재실행 시 할 일이 살아 있음", false); return
+    }
+    report.equal("재실행 — 미룬 시각이 남음", task.snoozedUntil, date(2026, 12, 2, 11, 54))
+    // 재실행 뒤 다시 예약해도 미룬 시각으로 들어간다
+    let r = ResolvedTask(task: task, effectiveDueAt: task.dueAt,
+                         startDeadline: task.startDeadline(effectiveDueAt: task.dueAt, calendar: cal),
+                         judgment: nil, parentTitle: nil, parentStart: nil)
+    let planned = NotificationScheduler.plan(for: [r], now: date(2026, 12, 2, 11, 30), limit: .max, calendar: cal)
+    report.equal("재실행 — 다시 예약해도 미룬 시각", planned.first?.fireDate, date(2026, 12, 2, 11, 54))
+}
+
+/// 실제 스토어의 **사본**을 새 스키마로 연다. 가벼운 이전이 기존 행을 잃지 않는지 본다.
+func migrateCheck(store: String, expected: Int) throws {
+    report.begin("스키마 이전 — 실제 스토어 사본")
+    let context = ModelContext(try openContainer(at: store))
+    let all = try context.fetch(FetchDescriptor<ManagedTask>())
+    report.equal("이전 후 할 일 개수가 그대로", all.count, expected)
+    report.check("기존 행의 snoozedUntil 은 비어 있다", all.allSatisfy { $0.snoozedUntil == nil })
+}
+
 // MARK: - 진입점
 
 @main
@@ -658,6 +708,20 @@ enum LinkIntegrityTests {
                 try completeVerify(store: arguments[1])
                 exit(report.finish())
 
+            case "--snooze-seed":
+                try snoozeSeed(store: arguments[1], marker: arguments[2])
+
+            case "--snooze-act":
+                try snoozeAct(store: arguments[1], marker: arguments[2])
+
+            case "--snooze-verify":
+                try snoozeVerify(store: arguments[1])
+                exit(report.finish())
+
+            case "--migrate-check":
+                try migrateCheck(store: arguments[1], expected: Int(arguments[2]) ?? -1)
+                exit(report.finish())
+
             case "--persist-verify":
                 try persistVerify(store: arguments[1], stage: arguments[2])
                 exit(report.finish())
@@ -678,6 +742,7 @@ enum LinkIntegrityTests {
                 testStartMomentText()
                 testTaskCompletion()
                 testAlarms()
+                testSnooze()
                 exit(report.finish())
             }
         } catch {
