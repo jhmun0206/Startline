@@ -34,6 +34,28 @@ nonisolated struct ResolvedTask: Identifiable {
     var id: UUID { task.id }
     var isAttached: Bool { task.isAttached }
 
+    // MARK: - 목록 순서
+
+    /// 할 일 목록의 순서. **우측 패널과 그리드가 같은 이 규칙을 쓴다.**
+    ///
+    /// 미완료 먼저, 완료는 아래. 각 그룹 안에서는 마감이 빠른 순, 같으면 제목 순.
+    /// 예전에는 시작 시점 순으로만 줄 세워 완료한 할 일이 미완료 사이에 섞였다.
+    ///
+    /// - Parameter isCompleted: 순서를 정할 때 쓸 완료 여부. 우측 패널은 체크 직후 1초 동안
+    ///   **이전 값**을 넘겨 자리를 붙잡아 둔다. 잘못 눌렀을 때 바로 되돌릴 수 있게.
+    static func listOrder(
+        _ lhs: ResolvedTask,
+        _ rhs: ResolvedTask,
+        isCompleted: (ResolvedTask) -> Bool = { $0.task.isCompleted }
+    ) -> Bool {
+        let l = isCompleted(lhs), r = isCompleted(rhs)
+        if l != r { return !l }
+        let ld = lhs.effectiveDueAt ?? .distantFuture
+        let rd = rhs.effectiveDueAt ?? .distantFuture
+        if ld != rd { return ld < rd }
+        return lhs.task.title < rhs.task.title
+    }
+
     // MARK: - 「위험」과 「놓침」 (명세서 9.4)
 
     // 같은 데이터를 두 곳에서 다르게 판정하면 언젠가 어긋난다. 실제로 그리드와 우측 패널이

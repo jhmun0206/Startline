@@ -280,9 +280,8 @@ struct TaskRow: View {
                     }
                 }
 
-                Text(detailText)
+                detailText
                     .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 // 미룬 걸 화면에서 알 수 있어야 한다. 알림에서만 보이면 잊는다.
                 // 회색 줄과 같은 모양이면 묻히므로 배경을 깐 작은 칩으로 둔다.
@@ -319,13 +318,26 @@ struct TaskRow: View {
     /// 언제 시작해야 하는지와 얼마나 걸리는지.
     /// 남은 시간을 숫자로 환산해 보여주지 않는다. (명세서 5.4)
     /// 마감과 알림 시각만 말한다. 상태어(「오늘 시작」·「늦음」)는 배지가 맡는다. (TaskTimeText)
-    private var detailText: String {
-        TaskTimeText.detail(
+    private var timeLine: TaskTimeText.Line {
+        TaskTimeText.line(
             effectiveDueAt: resolved.effectiveDueAt,
             alarmAt: resolved.startDeadline,
             isMissed: resolved.isMissed(now: now),
+            isCompleted: task.isCompleted,
             now: now
         )
+    }
+
+    /// 한 줄 안에서 **마감은 한 단계 진하게, 알림은 한 단계 연하게.** 아이콘 없이 굵기·색으로만 가른다.
+    ///
+    /// `.secondary` 와 `.tertiary` 는 시스템 계층색이라 다크 모드에서도 두 단계 차이가 유지된다.
+    private var detailText: Text {
+        let line = timeLine
+        let due = Text(line.due).foregroundStyle(.secondary).fontWeight(.medium)
+        guard let alarm = line.alarm else { return due }
+        return due
+            + Text(" · ").foregroundStyle(.tertiary)
+            + Text(alarm).foregroundStyle(.tertiary)
     }
 }
 

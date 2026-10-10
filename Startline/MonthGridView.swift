@@ -1188,17 +1188,20 @@ struct TaskPreviewCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // 우측 패널 할 일 행과 같은 함수로 적는다. 두 곳이 다르게 말하면 안 된다.
-            if let due = resolved.effectiveDueAt {
-                Label(TaskTimeText.due(due, now: Date(), calendar: .current), systemImage: "checkmark.circle")
+            // 우측 패널 할 일 행과 **같은 결과**를 쓴다. 두 곳이 다르게 말하면 안 된다.
+            let timeLine = TaskTimeText.line(
+                effectiveDueAt: resolved.effectiveDueAt,
+                alarmAt: resolved.startDeadline,
+                isMissed: resolved.isMissed(now: Date()),
+                isCompleted: task.isCompleted
+            )
+            Label(timeLine.due, systemImage: "checkmark.circle")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            if let alarm = timeLine.alarm {
+                Label(alarm, systemImage: "bell")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let alarmAt = resolved.startDeadline {
-                Label(TaskTimeText.alarm(alarmAt, now: Date(), calendar: .current), systemImage: "bell")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
 
             HStack(spacing: 6) {

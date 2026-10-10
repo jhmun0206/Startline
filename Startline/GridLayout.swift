@@ -412,10 +412,14 @@ nonisolated struct WeekLayout {
         let continuesAfter: Bool
 
         // ── 같은 자리를 다툴 때의 순서 ──
-        // 우측 패널과 같은 규칙이어야 한다. 종일 먼저, 그 다음 시작시각, 그 다음 제목.
+        // 우측 패널과 같은 규칙이어야 한다.
+        //   일정: 종일 먼저, 그 다음 시작시각, 그 다음 제목
+        //   할 일: 미완료 먼저, 그 다음 마감, 그 다음 제목 (ResolvedTask.listOrder 와 같다)
         let isAllDay: Bool
         let start: Date
         let title: String
+        /// 할 일이 완료됐는지. 일정은 늘 `false` 라 순서에 영향이 없다.
+        var isCompleted = false
 
         func overlaps(_ other: PendingItem) -> Bool {
             startColumn <= other.endColumn && other.startColumn <= endColumn
@@ -424,6 +428,7 @@ nonisolated struct WeekLayout {
         /// 문자열 하나로 뭉치지 않는다. `"false|…" < "true|…"` 처럼
         /// 사전순이 의도와 반대로 뒤집히는 일이 생긴다.
         func isOrderedBefore(_ other: PendingItem) -> Bool {
+            if isCompleted != other.isCompleted { return !isCompleted }
             if isAllDay != other.isAllDay { return isAllDay }
             if start != other.start { return start < other.start }
             return title < other.title
@@ -486,8 +491,10 @@ nonisolated struct WeekLayout {
                 continuesBefore: start < weekStart,
                 continuesAfter: end > weekEnd,
                 isAllDay: false,
-                start: item.resolved.startDeadline ?? item.resolved.effectiveDueAt ?? item.startDay,
-                title: item.resolved.task.title
+                // 우측 패널과 같은 기준 — 마감. (예전에는 알림 시각이었다)
+                start: item.resolved.effectiveDueAt ?? item.startDay,
+                title: item.resolved.task.title,
+                isCompleted: item.resolved.task.isCompleted
             )
         }
     }

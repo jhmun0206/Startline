@@ -44,29 +44,60 @@ nonisolated enum TaskTimeText {
         "알림 \(moment(date, now: now, calendar: calendar))"
     }
 
-    /// 할 일 행의 회색 줄 전체.
+    /// 한 줄을 이루는 두 조각. 화면은 **마감을 진하게, 알림을 연하게** 칠한다.
+    struct Line: Equatable {
+        /// 「마감 오늘 오후 4시 15분」 / 「10월 8일 (목) 저녁 7시까지였어요」 / 「마감 없음」
+        let due: String
+        /// 「알림 오후 4시 10분」. 알림이 없거나, 완료했거나, 기한이 지났으면 `nil`.
+        let alarm: String?
+
+        /// 한 문자열로 이은 것. 검증과 읽기 전용 표시에 쓴다.
+        var plain: String { [due, alarm].compactMap { $0 }.joined(separator: " · ") }
+    }
+
+    /// 할 일 행의 회색 줄. **우측 패널 행과 그리드 미리보기가 같은 이 결과를 쓴다.**
+    ///
+    /// - 마감과 알림이 **같은 날**이면 날짜어(오늘/내일/날짜)는 마감 쪽에만 붙인다.
+    ///   「마감 오늘 오후 4시 15분 · 알림 오후 4시 10분」 — 같은 말이 한 줄에 두 번 나오지 않게.
+    /// - 완료한 할 일은 마감만 말한다. 알림은 이제 뜻이 없다.
+    /// - 기한이 지났으면 「…까지였어요」. 알림은 말하지 않는다.
     ///
     /// - Parameters:
     ///   - effectiveDueAt: 마감. 사용자가 입력한 값(또는 부모 기준으로 계산한 값) 그대로.
     ///   - alarmAt: 알림 시각. `startDeadline` 이 이것이다. 「알림 없음」이면 `nil`.
-    ///   - isMissed: 마감이 지났고 끝내지 않았는지. 그러면 알림은 말하지 않는다.
+    static func line(
+        effectiveDueAt: Date?,
+        alarmAt: Date?,
+        isMissed: Bool,
+        isCompleted: Bool = false,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Line {
+        guard let effectiveDueAt else { return Line(due: "마감 없음", alarm: nil) }
+
+        if isMissed {
+            return Line(due: "\(moment(effectiveDueAt, now: now, calendar: calendar))까지였어요", alarm: nil)
+        }
+
+        let dueText = due(effectiveDueAt, now: now, calendar: calendar)
+        guard !isCompleted, let alarmAt else { return Line(due: dueText, alarm: nil) }
+
+        let alarmText = calendar.isDate(alarmAt, inSameDayAs: effectiveDueAt)
+            ? "알림 \(StartlineFormat.spokenTime(alarmAt, calendar: calendar))"
+            : alarm(alarmAt, now: now, calendar: calendar)
+        return Line(due: dueText, alarm: alarmText)
+    }
+
+    /// `line(...)` 을 한 문자열로. (예전 이름을 쓰던 곳과 검증을 위해 남긴다)
     static func detail(
         effectiveDueAt: Date?,
         alarmAt: Date?,
         isMissed: Bool,
+        isCompleted: Bool = false,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String {
-        guard let effectiveDueAt else { return "마감 없음" }
-
-        if isMissed {
-            return "\(moment(effectiveDueAt, now: now, calendar: calendar))까지였어요"
-        }
-
-        var parts = [due(effectiveDueAt, now: now, calendar: calendar)]
-        if let alarmAt {
-            parts.append(alarm(alarmAt, now: now, calendar: calendar))
-        }
-        return parts.joined(separator: " · ")
+        line(effectiveDueAt: effectiveDueAt, alarmAt: alarmAt, isMissed: isMissed,
+             isCompleted: isCompleted, now: now, calendar: calendar).plain
     }
 }

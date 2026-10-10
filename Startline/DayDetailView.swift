@@ -30,6 +30,51 @@ struct DayDetailView: View {
 
     /// 착수 판정이 시간에 따라 바뀌므로 주기적으로 갱신한다.
     @State private var now = Date()
+
+    /// 순서를 정할 때 쓰는 완료 여부 — 화면에 **지금 보이는 자리**의 기준.
+    ///
+    /// 체크하자마자 아래로 날아가면, 잘못 눌렀을 때 그 행을 찾아 되돌리기 어렵다.
+    /// 그래서 순서는 실제 값이 아니라 이 값으로 정하고, 바뀐 뒤 **1초 기다렸다가** 따라잡는다.
+    /// 미완료로 되돌릴 때도 같다.
+    ///
+    /// 체크한 **뒤에** 붙잡는 방식이면 첫 화면이 이미 새 순서로 그려져 한 번 튀었다가 돌아온다.
+    /// 이 값은 체크해도 곧바로 바뀌지 않으므로 그 순간에도 제자리다.
+    @State private var orderedCompletion: [UUID: Bool] = [:]
+    /// 따라잡기 예약 표식. 1초 안에 다시 누르면 먼저 건 것은 무효가 된다.
+    @State private var reorderTokens: [UUID: UUID] = [:]
+
+    /// 체크한 뒤 자리를 옮기기까지 기다리는 시간.
+    private static let reorderDelay: Duration = .seconds(1)
+
+    private func orderingCompletion(_ resolved: ResolvedTask) -> Bool {
+        orderedCompletion[resolved.id] ?? resolved.task.isCompleted
+    }
+
+    private var completionSignature: [UUID: Bool] {
+        Dictionary(resolvedTasks.map { ($0.id, $0.task.isCompleted) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// 실제 완료 여부가 바뀌면 1초 뒤에 화면 순서를 따라잡는다.
+    private func followCompletion(_ current: [UUID: Bool]) {
+        // 사라진 할 일은 잊고, 처음 보는 할 일은 곧바로 맞춘다 (옮길 자리가 없다).
+        orderedCompletion = orderedCompletion.filter { current[$0.key] != nil }
+        for (id, value) in current where orderedCompletion[id] == nil {
+            orderedCompletion[id] = value
+        }
+
+        for (id, value) in current where orderedCompletion[id] != value {
+            let token = UUID()
+            reorderTokens[id] = token
+            Task { @MainActor in
+                try? await Task.sleep(for: Self.reorderDelay)
+                guard reorderTokens[id] == token else { return }
+                reorderTokens[id] = nil
+                // 그 사이 되돌렸으면 값이 같아져 움직이지 않는다.
+                let latest = completionSignature[id]
+                withAnimation(.easeInOut(duration: 0.3)) { orderedCompletion[id] = latest }
+            }
+        }
+    }
     @State private var editingTask: ManagedTask?
     @State private var isAddingItem = false
     /// 「일정 추가」에서 만든 일정을 부모로 이어받은 할 일 입력.
@@ -93,12 +138,8 @@ struct DayDetailView: View {
             // 마감일을 고른 순간에는 같은 항목이 두 섹션에 동시에 나온다.
             .filter { !$0.isMissed(now: now) }
             .filter(matchesSelectedDay)
-            .sorted { lhs, rhs in
-                let l = lhs.startDeadline ?? lhs.effectiveDueAt ?? .distantFuture
-                let r = rhs.startDeadline ?? rhs.effectiveDueAt ?? .distantFuture
-                if l != r { return l < r }
-                return lhs.task.title < rhs.task.title
-            }
+            // 미완료 먼저, 완료는 아래. 그리드와 같은 규칙이다. (ResolvedTask.listOrder)
+            .sorted { ResolvedTask.listOrder($0, $1, isCompleted: orderingCompletion) }
     }
 
     private func matchesSelectedDay(_ resolved: ResolvedTask) -> Bool {
@@ -186,6 +227,8 @@ struct DayDetailView: View {
             }
         }
         .onReceive(clock) { now = $0 }
+        .onAppear { orderedCompletion = completionSignature }
+        .onChange(of: completionSignature) { _, current in followCompletion(current) }
         .task(id: manager.displayedMonth) { syncLinks() }
         // 캘린더 앱 등에서 일정이 바뀌면 CalendarManager 가 토큰을 올린다.
         // 뷰 본문이 아니라 여기서 정리하므로 렌더링 중 저장이 일어나지 않는다.
@@ -384,8 +427,9 @@ struct DayDetailView: View {
     /// 이 일정에 딸린 할 일. 중복 등록분 중 어느 캘린더의 것을 골랐든 찾아낸다.
     private func attachedTasks(for dayEvent: DayEvent) -> [ResolvedTask] {
         let identifiers = Set(dayEvent.events.compactMap(\.eventIdentifier))
+        // 일정 카드 안 딸린 할 일도 같은 순서다. 한 패널 안에서 순서 규칙이 둘이면 안 된다.
         return identifiers.flatMap { tasksByParent[$0] ?? [] }
-            .sorted { ($0.effectiveDueAt ?? .distantFuture) < ($1.effectiveDueAt ?? .distantFuture) }
+            .sorted { ResolvedTask.listOrder($0, $1, isCompleted: orderingCompletion) }
     }
 
     // MARK: - 3계층: 이 날의 할 일
