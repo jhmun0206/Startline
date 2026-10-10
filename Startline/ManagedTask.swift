@@ -426,6 +426,11 @@ nonisolated enum StartlineFormat {
     /// "9월 27일 (일) 저녁 8시 59분" — 사람이 말하는 방식으로 시각을 적는다.
     /// 명세서 5.4 — 남은 시간을 환산한 숫자는 넣지 않는다. 시점만 말한다.
     static func spokenDayTime(_ date: Date, calendar: Calendar = .current) -> String {
+        "\(spokenDay.string(from: date)) \(spokenTime(date, calendar: calendar))"
+    }
+
+    /// "저녁 8시 59분" — 날짜 없이 시각만.
+    static func spokenTime(_ date: Date, calendar: Calendar = .current) -> String {
         let hour24 = calendar.component(.hour, from: date)
         let minute = calendar.component(.minute, from: date)
 
@@ -439,11 +444,9 @@ nonisolated enum StartlineFormat {
         }
 
         let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-        let time = minute == 0
+        return minute == 0
             ? "\(period) \(hour12)시"
             : "\(period) \(hour12)시 \(minute)분"
-
-        return "\(spokenDay.string(from: date)) \(time)"
     }
 
     /// 소요시간을 "1시간 30분" 형태로.

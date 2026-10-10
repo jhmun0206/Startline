@@ -143,30 +143,9 @@ struct TodayStartSection: View {
 
     private var calendar: Calendar { .current }
 
-    /// 오늘 시작해야 하는 일. 완료한 것도 「원래 있었는지」를 세기 위해 포함한다.
-    ///
-    /// **판정은 `ResolvedTask.isTodaysStart` 하나만 쓴다.** 예전에는 조건을 여기서 직접
-    /// 적었고, 그래서 **마감까지 지난 일까지 「오늘 시작할 일」로 세고 있었다.**
-    /// 마감이 지난 것을 오늘 시작하라고 말하는 것은 말이 안 된다.
-    /// 그런 항목은 맨 아래 「기한 지난 할 일」이 맡는다.
-    private var todaysTasks: [ResolvedTask] {
-        tasks.filter { $0.isTodaysStart(now: now, calendar: calendar) }
-    }
 
-    private var remainingCount: Int {
-        todaysTasks.filter { !$0.task.isCompleted }.count
-    }
-
-    private enum State {
-        case remaining(Int)
-        case allDone
-        case none
-    }
-
-    private var state: State {
-        if remainingCount > 0 { return .remaining(remainingCount) }
-        // 원래 있었는데 전부 체크한 경우에만 마쳤다고 말한다.
-        return todaysTasks.isEmpty ? .none : .allDone
+    private var state: TodayBanner {
+        TodayBanner.state(tasks: tasks, now: now, calendar: calendar)
     }
 
     var body: some View {
@@ -187,20 +166,15 @@ struct TodayStartSection: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)
-        .animation(.easeOut(duration: 0.15), value: remainingCount)
+        .animation(.easeOut(duration: 0.15), value: state)
     }
 
-    private var message: String {
-        switch state {
-        case .remaining(let count): return "오늘 시작할 일이 \(count)개 남았어요"
-        case .allDone: return "오늘 할 일을 다 마쳤어요. 수고했어요"
-        case .none: return "오늘 시작할 일이 0개예요"
-        }
-    }
+    private var message: String { state.message }
 
     private var symbol: String {
         switch state {
         case .remaining: return "exclamationmark.triangle.fill"
+        case .missed: return "exclamationmark.circle.fill"
         case .allDone: return "checkmark.circle.fill"
         case .none: return "calendar"
         }
@@ -209,6 +183,8 @@ struct TodayStartSection: View {
     private var tint: Color {
         switch state {
         case .remaining: return .orange
+        // 「늦음」 배지와 같은 계열. 기한이 지난 일이라는 뜻이 같다.
+        case .missed: return .red
         case .allDone: return .green
         case .none: return .secondary
         }
@@ -252,9 +228,6 @@ struct TaskRow: View {
     /// **들여쓰기 말고는 아무것도 다르지 않다.** 같은 데이터가 위치에 따라 다르게 보이면
     /// 사용자는 둘을 다른 것으로 인식한다. 계층은 들여쓰기와 구분선으로만 나타낸다.
     var isNested = false
-    /// 「기한 지난 할 일」 섹션에서는 **언제까지였는지**를 보여준다.
-    /// 다른 자리에서는 「언제 시작하는지」가 중요하지만, 여기서는 이미 지난 마감이 핵심이다.
-    var showsMissedDeadline = false
     /// 「할 일」 섹션에서는 부모 일정명을 함께 보여준다.
     /// 부모 카드 아래에서는 이미 맥락이 있으므로 붙이지 않는다.
     var showsParentContext = false
@@ -312,13 +285,10 @@ struct TaskRow: View {
                     .foregroundStyle(.secondary)
 
                 // 미룬 걸 화면에서 알 수 있어야 한다. 알림에서만 보이면 잊는다.
+                // 회색 줄과 같은 모양이면 묻히므로 배경을 깐 작은 칩으로 둔다.
+                // 색은 중립 — 「늦음」(빨강)·「오늘 시작」(주황) 배지와 헷갈리지 않게.
                 if let pendingSnooze {
-                    Label(
-                        "30분 미뤄짐 · \(Self.snoozeTimeFormatter.string(from: pendingSnooze))에 다시 알림",
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    SnoozeChip(text: "30분 미뤄짐 · \(Self.snoozeTimeFormatter.string(from: pendingSnooze))에 다시 알림")
                 }
             }
             // 체크박스는 제외하고 본문만 눌러야 수정 시트가 열린다.
@@ -348,40 +318,14 @@ struct TaskRow: View {
 
     /// 언제 시작해야 하는지와 얼마나 걸리는지.
     /// 남은 시간을 숫자로 환산해 보여주지 않는다. (명세서 5.4)
+    /// 마감과 알림 시각만 말한다. 상태어(「오늘 시작」·「늦음」)는 배지가 맡는다. (TaskTimeText)
     private var detailText: String {
-        var parts: [String] = []
-
-        // 명세서 5.4 — 「3일 지났습니다」처럼 지난 시간을 숫자로 환산하지 않는다.
-        // 날짜를 밝히는 것까지만 한다.
-        if showsMissedDeadline {
-            if let due = resolved.effectiveDueAt {
-                parts.append("\(StartlineFormat.spokenDayTime(due))까지였어요")
-            } else {
-                parts.append("마감 없음")
-            }
-            if let duration = task.estimatedDuration {
-                parts.append("\(StartlineFormat.duration(duration)) 걸림")
-            }
-            return parts.joined(separator: " · ")
-        }
-
-        if let deadline = resolved.startDeadline {
-            // 문구는 StartMomentText 한 곳에서 만든다. 마감과 다른 날이면 날짜까지만 말한다.
-            parts.append(
-                StartMomentText.short(
-                    startDeadline: deadline,
-                    effectiveDueAt: resolved.effectiveDueAt
-                )
-            )
-        } else {
-            parts.append("시작 시점 없음")
-        }
-
-        if let duration = task.estimatedDuration {
-            parts.append("\(StartlineFormat.duration(duration)) 걸림")
-        }
-
-        return parts.joined(separator: " · ")
+        TaskTimeText.detail(
+            effectiveDueAt: resolved.effectiveDueAt,
+            alarmAt: resolved.startDeadline,
+            isMissed: resolved.isMissed(now: now),
+            now: now
+        )
     }
 }
 
@@ -407,5 +351,27 @@ struct TodoSectionContent: View {
                 )
             }
         }
+    }
+}
+
+/// 「30분 미뤄짐 · 오후 3:10에 다시 알림」 — 배경을 깐 작은 칩.
+///
+/// 노션의 인라인 코드처럼 옅은 배경 위에 둔다. 판정 배지(캡슐, 색 있음)와 모양·색을 다르게 해
+/// 상태가 아니라 **예약 정보**라는 것이 드러나게 한다.
+struct SnoozeChip: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "clock.arrow.circlepath")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.07))
+            )
+            .fixedSize()
+            .padding(.top, 2)
     }
 }

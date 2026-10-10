@@ -27,6 +27,8 @@ SOURCES=(
   "$ROOT/Startline/SheetChrome.swift"
   "$ROOT/Startline/EventDeletion.swift"
   "$ROOT/Startline/StartMomentText.swift"
+  "$ROOT/Startline/TaskTimeText.swift"
+  "$ROOT/Startline/TodayBanner.swift"
   "$ROOT/Startline/NotificationScheduler.swift"
   "$ROOT/Startline/NotificationCompletion.swift"
   "$ROOT/Startline/GridSelection.swift"
@@ -40,6 +42,7 @@ SOURCES=(
   "$ROOT/Tests/TaskCompletionTests.swift"
   "$ROOT/Tests/AlarmTests.swift"
   "$ROOT/Tests/SnoozeTests.swift"
+  "$ROOT/Tests/PanelTextTests.swift"
   "$ROOT/Tests/LinkIntegrityTests.swift"
 )
 

@@ -435,7 +435,6 @@ struct DayDetailView: View {
                     ) {
                         TaskRow(
                             resolved: resolved,
-                            showsMissedDeadline: true,
                             showsParentContext: true,
                             now: now,
                             onEdit: { editingTask = resolved.task },

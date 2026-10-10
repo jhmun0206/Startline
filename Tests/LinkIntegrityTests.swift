@@ -743,6 +743,7 @@ enum LinkIntegrityTests {
                 testTaskCompletion()
                 testAlarms()
                 testSnooze()
+                testPanelText()
                 exit(report.finish())
             }
         } catch {
