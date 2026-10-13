@@ -679,7 +679,8 @@ func migrateCheck(store: String, expected: Int) throws {
     let context = ModelContext(try openContainer(at: store))
     let all = try context.fetch(FetchDescriptor<ManagedTask>())
     report.equal("이전 후 할 일 개수가 그대로", all.count, expected)
-    report.check("기존 행의 snoozedUntil 은 비어 있다", all.allSatisfy { $0.snoozedUntil == nil })
+    // 예전에는 「기존 행의 snoozedUntil 은 비어 있다」도 봤다. 필드를 처음 넣을 때(BL-072)만 맞는 전제였다.
+    // 이제 실사용 중 미룬 할 일이 실제 스토어에 있을 수 있어 그 검사는 뺀다. 이전이 행을 잃지 않는지만 본다.
 }
 
 // MARK: - 진입점
