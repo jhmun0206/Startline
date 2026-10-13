@@ -4,9 +4,8 @@
 //
 //  할 일 입력 시트.
 //
-//  사용자에게 계산 방식을 고르라고 묻지 않는다. 사용자는 자기 상황만 말하고,
-//  리드타임 방식은 소요시간 입력 여부에서 자동으로 결정된다.
-//  명세서 12장 「소요시간 입력 마찰」 — 입력을 선택으로 바꾼다.
+//  마감과 「시작 알림」을 고른다. 알림 시각 = 마감 − 고른 오프셋. 앱이 계산하거나 보정하지 않는다.
+//  소요시간 입력은 2026-10-07 방향 전환으로 없앴다. (DESIGN_direction 5장 ②, BL-065)
 //
 
 import EventKit
@@ -40,19 +39,12 @@ struct TaskEditorView: View {
         case attachedToEvent
     }
 
-    /// 소요시간을 모를 때 고르는 대안.
-    private enum ReminderChoice: Hashable {
-        case threeDays
-        case oneWeek
-        case never
-    }
-
     @State private var title = ""
     @State private var dueMode: DueMode = .specificDate
     @State private var dueAt = Date()
-    @State private var hours = 0
-    @State private var minutes = 0
-    @State private var reminderChoice: ReminderChoice?
+    @State private var alarmInput = StartAlarmInput.default
+    /// 불러온 그대로의 칩 상태. 사용자가 칩을 건드리지 않았으면 저장값을 다시 쓰지 않는다. (원칙 1)
+    @State private var loadedAlarmInput: StartAlarmInput?
 
     /// 부모로 고른 일정.
     @State private var parentEvent: EKEvent?
@@ -61,15 +53,7 @@ struct TaskEditorView: View {
     /// 「며칠 전까지」의 직접 입력 줄을 펼쳤는지. 칩에 없는 값을 불러오면 켜진다.
     @State private var isEnteringCustomDays = false
 
-    /// UI로 표현할 수 없는 기존 리드타임(시간 단위 등)을 편집 중에 잃지 않도록 보관한다.
-    @State private var preservedLeadTime: LeadTime?
-
     private var isEditing: Bool { task != nil }
-
-    private var estimatedDuration: TimeInterval? {
-        let total = TimeInterval(hours * 3600 + minutes * 60)
-        return total > 0 ? total : nil
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -112,14 +96,8 @@ struct TaskEditorView: View {
                         parentEventRow
                     }
 
-                    durationBlock
-
-                    if estimatedDuration == nil {
-                        reminderFallback
-                    }
-
-                    if let deadline = startDeadline {
-                        startNote(deadline)
+                    SheetField(verticalPadding: 6) {
+                        StartAlarmChips(input: $alarmInput, alarmAt: alarmAt)
                     }
                 }
                 .padding(.horizontal, SheetMetrics.padding)
@@ -136,7 +114,7 @@ struct TaskEditorView: View {
                 Spacer()
                 Button(isEditing ? "저장" : "추가") { save() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || alarmInput.leadTime == nil)
             }
             .padding(16)
         }
@@ -148,27 +126,6 @@ struct TaskEditorView: View {
         } message: {
             Text("‘\(title)’를 목록에서 지워요. 연결된 일정은 그대로 남아요.")
         }
-    }
-
-    /// 착수마감이 산출될 때만 나온다. 남은 시간을 숫자로 환산하지 않는다. (명세서 5.4)
-    private func startNote(_ deadline: Date) -> some View {
-        Label(
-            StartMomentText.sentence(
-                startDeadline: deadline,
-                effectiveDueAt: effectiveDueAt
-            ),
-            systemImage: "flag"
-        )
-        .font(.callout)
-        .foregroundStyle(Color.accentColor)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: SheetMetrics.corner)
-                .fill(Color.accentColor.opacity(0.12))
-        )
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - 「언제까지」 방식 고르기
@@ -248,132 +205,13 @@ struct TaskEditorView: View {
         -TimeInterval(daysBeforeParent) * 24 * 60 * 60
     }
 
-    // MARK: - 소요시간 입력
+    // MARK: - 시작 알림
 
-    private var durationBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("얼마나 걸릴까요")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    /// 지금 칩 상태로 저장할 값. 범위를 벗어났으면 `nil` (저장 버튼이 꺼진다).
+    private var currentLeadTime: LeadTime? { alarmInput.leadTime }
 
-            HStack(spacing: 5) {
-                ForEach(DurationPreset.all) { preset in
-                    presetChip(preset)
-                }
-            }
-
-            SheetField(verticalPadding: 5) {
-                HStack(spacing: 5) {
-                    Text("직접")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("0", value: $hours, format: .number)
-                        .textFieldStyle(.plain)
-                        .frame(width: 34)
-                        .multilineTextAlignment(.trailing)
-                    Text("시간").font(.caption)
-                    TextField("0", value: $minutes, format: .number)
-                        .textFieldStyle(.plain)
-                        .frame(width: 34)
-                        .multilineTextAlignment(.trailing)
-                    Text("분").font(.caption)
-                    Spacer(minLength: 0)
-                    Button("지우기") {
-                        hours = 0
-                        minutes = 0
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .disabled(hours == 0 && minutes == 0)
-                }
-            }
-        }
-    }
-
-    private func presetChip(_ preset: DurationPreset) -> some View {
-        let isOn = estimatedDuration == preset.duration
-
-        return Text(preset.label)
-            .font(.caption)
-            .fontWeight(isOn ? .semibold : .regular)
-            .foregroundStyle(isOn ? Color.accentColor : .primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isOn ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture { apply(preset) }
-    }
-
-    private func apply(_ preset: DurationPreset) {
-        let totalMinutes = Int(preset.duration) / 60
-        hours = totalMinutes / 60
-        minutes = totalMinutes % 60
-    }
-
-    // MARK: - 소요시간을 모를 때
-
-    /// 소요시간이 비어 있을 때만 나온다. 계산 방식을 묻는 대신
-    /// "며칠 전에 알려줄까"라는 사용자가 답할 수 있는 질문으로 바꾼다.
-    private var reminderFallback: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("얼마나 걸릴지 모르겠다면, 며칠 전에 알려드릴까요?")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 5) {
-                choiceButton("3일 전", .threeDays)
-                choiceButton("1주 전", .oneWeek)
-                choiceButton("알림 없음", .never)
-            }
-        }
-    }
-
-    private func choiceButton(_ label: String, _ choice: ReminderChoice) -> some View {
-        let isOn = reminderChoice == choice
-
-        return Text(label)
-            .font(.caption)
-            .fontWeight(isOn ? .semibold : .regular)
-            .foregroundStyle(isOn ? Color.accentColor : .primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isOn ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                reminderChoice = choice
-                preservedLeadTime = nil
-            }
-    }
-
-    // MARK: - 리드타임 결정
-
-    /// 사용자에게 묻지 않고 결정한다.
-    /// 소요시간이 있으면 역산, 없으면 고른 대안, 아무것도 없으면 리드타임 없음.
-    private var currentLeadTime: LeadTime {
-        if estimatedDuration != nil { return .durationBased }
-
-        switch reminderChoice {
-        case .threeDays: return .fixed(days: 3)
-        case .oneWeek: return .fixed(days: 7)
-        case .never: return .none
-        case nil: return preservedLeadTime ?? .none
-        }
-    }
+    /// 칩을 건드리지 않았으면 저장값을 그대로 둔다.
+    private var alarmChanged: Bool { alarmInput != loadedAlarmInput }
 
     /// 지금 입력 상태로 계산되는 실효마감. (명세서 4.2)
     private var effectiveDueAt: Date? {
@@ -386,12 +224,15 @@ struct TaskEditorView: View {
         }
     }
 
-    private var startDeadline: Date? {
+    /// 미리보기에 보일 알림 시각. 저장할 때와 **같은 계산**(`ManagedTask.startDeadline`)을 쓴다.
+    private var alarmAt: Date? {
+        guard let leadTime = currentLeadTime else { return nil }
         let preview = ManagedTask(
             title: title,
             dueAt: effectiveDueAt,
-            estimatedDuration: estimatedDuration,
-            leadTime: currentLeadTime
+            // 옛 소요시간 값은 그대로 들고 가야 같은 시각이 나온다.
+            estimatedDuration: alarmInput.choice == .legacy ? task?.estimatedDuration : nil,
+            leadTime: leadTime
         )
         return preview.startDeadline(effectiveDueAt: effectiveDueAt)
     }
@@ -411,12 +252,6 @@ struct TaskEditorView: View {
         title = task.title
         dueAt = task.dueAt ?? defaultDueDate
 
-        if let duration = task.estimatedDuration {
-            let totalMinutes = Int(duration) / 60
-            hours = totalMinutes / 60
-            minutes = totalMinutes % 60
-        }
-
         // 부모가 붙어 있으면 「일정에 맞춰」로 열고, 후보 목록에 없으면 부모를 직접 찾아 채운다.
         if let parentEventID = task.parentEventID {
             dueMode = .attachedToEvent
@@ -432,15 +267,9 @@ struct TaskEditorView: View {
             }
         }
 
-        // 저장된 리드타임을 이 화면의 선택지로 되돌린다.
-        // 대응되는 선택지가 없으면(시간 단위 등) 원래 값을 그대로 보존한다.
-        switch task.leadTime {
-        case .fixed(days: 3): reminderChoice = .threeDays
-        case .fixed(days: 7): reminderChoice = .oneWeek
-        case .none: reminderChoice = .never
-        case .durationBased: reminderChoice = nil
-        default: preservedLeadTime = task.leadTime
-        }
+        // 저장된 값을 칩으로 되돌린다. 칩에 없는 값은 「기존 값」 칩으로 그대로 보존한다.
+        alarmInput = StartAlarmInput.from(leadTime: task.leadTime, estimatedDuration: task.estimatedDuration)
+        loadedAlarmInput = alarmInput
     }
 
     private func delete() {
@@ -462,26 +291,24 @@ struct TaskEditorView: View {
     /// 저장하지 않은 입력이 있는지.
     private var hasUnsavedInput: Bool {
         if let task {
-            return title != task.title
-                || estimatedDuration != task.estimatedDuration
-                || currentLeadTime != task.leadTime
+            return title != task.title || alarmChanged
         }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
-            || estimatedDuration != nil
             || parentEvent != nil
     }
 
     private func save() {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, let leadTime = currentLeadTime else { return }
 
         if let task {
             let alarmBefore = task.alarmInputs
             defer { task.clearSnoozeIfAlarmChanged(from: alarmBefore) }
             task.title = trimmed
-            // 사용자 입력값을 그대로 저장한다. 배수를 곱하지 않는다. (원칙 1)
-            task.estimatedDuration = estimatedDuration
-            task.leadTime = currentLeadTime
+            // 칩을 건드렸을 때만 쓴다. 옛 소요시간 데이터(`estimatedDuration`)는 지우지 않는다. (원칙 1)
+            if alarmChanged {
+                task.leadTime = leadTime
+            }
             apply(to: task)
         } else {
             // 새로 만들 때는 「일정에 맞춰」로 고르고 실제로 일정을 집었을 때만 붙인다.
@@ -494,15 +321,13 @@ struct TaskEditorView: View {
                     parentOccurrenceDate: parent.startDate,
                     offsetFromParent: offsetFromParent,
                     lastKnownDueAt: effectiveDueAt,
-                    estimatedDuration: estimatedDuration,
-                    leadTime: currentLeadTime
+                    leadTime: leadTime
                 )
             } else {
                 newTask = ManagedTask(
                     title: trimmed,
                     dueAt: dueAt,
-                    estimatedDuration: estimatedDuration,
-                    leadTime: currentLeadTime
+                    leadTime: leadTime
                 )
             }
             modelContext.insert(newTask)

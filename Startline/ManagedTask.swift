@@ -244,8 +244,9 @@ extension ManagedTask {
             return due.addingTimeInterval(-estimatedDuration)
 
         case .fixed(let days):
-            // 일 단위는 캘린더 연산으로 뺀다. 서머타임 등에서 하루가 24시간이 아닐 수 있다.
-            return calendar.date(byAdding: .day, value: -days, to: due)
+            // 「N일 전」 = 정확히 N×24시간. 부모 기준 상대 마감(`offsetFromParent`)과 같은 기준이다.
+            // (BL-022, DESIGN_direction 5장 ③) 서머타임이 없는 한국 시간대에서는 예전 캘린더 연산과 결과가 같다.
+            return due.addingTimeInterval(-TimeInterval(days) * 24 * 60 * 60)
 
         case .fixedHours(let hours):
             return calendar.date(byAdding: .hour, value: -hours, to: due)

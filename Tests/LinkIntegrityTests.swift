@@ -749,6 +749,7 @@ enum LinkIntegrityTests {
                 testSnooze()
                 testPanelText()
                 testTimeFormat()
+                testStartAlarmInput()
                 exit(report.finish())
             }
         } catch {

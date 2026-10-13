@@ -94,3 +94,74 @@ func testAlarms() {
     }
     report.check("남의 알림 → 없음", PlannedNotification.taskID(from: "startline.test.\(id.uuidString)") == nil)
 }
+
+// MARK: - 시작 알림 칩 (커밋 4, BL-065)
+
+func testStartAlarmInput() {
+    report.begin("시작 알림 칩 (StartAlarmInput)")
+
+    // ── 기본값과 저장값
+    report.equal("기본값 1일", StartAlarmInput.default.leadTime, .fixed(days: 1))
+    report.equal("[시간] 3", StartAlarmInput(choice: .hours, hours: 3).leadTime, .fixedHours(3))
+    report.equal("[2일]", StartAlarmInput(choice: .days(2)).leadTime, .fixed(days: 2))
+    report.equal("[직접] 5일", StartAlarmInput(choice: .customDays, customDays: 5).leadTime, .fixed(days: 5))
+    report.equal("[직접] 0일 = 마감 시각", StartAlarmInput(choice: .customDays, customDays: 0).leadTime, .fixed(days: 0))
+    report.equal("[없음]", StartAlarmInput(choice: .none).leadTime, LeadTime.none)
+
+    // ── 범위 — 벗어나면 저장값이 없고 이유가 나온다 (저장 버튼이 꺼진다)
+    for bad in [0, -1, 73] {
+        let input = StartAlarmInput(choice: .hours, hours: bad)
+        report.check("[시간] \(bad) → 저장 불가", input.leadTime == nil && input.invalidReason != nil)
+    }
+    for bad in [-1, 366] {
+        let input = StartAlarmInput(choice: .customDays, customDays: bad)
+        report.check("[직접] \(bad)일 → 저장 불가", input.leadTime == nil && input.invalidReason != nil)
+    }
+    report.check("범위 안이면 이유 없음", StartAlarmInput(choice: .hours, hours: 72).invalidReason == nil)
+    // 고르지 않은 칸의 값은 따지지 않는다
+    report.check("[1일]이면 시간 칸 값은 무시", StartAlarmInput(choice: .days(1), hours: 999).invalidReason == nil)
+
+    // ── 불러오기 — 가까운 칩으로 바꾸지 않는다 (원칙 1)
+    func load(_ lead: LeadTime, _ duration: TimeInterval? = nil) -> StartAlarmInput {
+        StartAlarmInput.from(leadTime: lead, estimatedDuration: duration)
+    }
+    report.equal("3일 → [3일]", load(.fixed(days: 3)).choice, .days(3))
+    report.equal("7일(예전 「1주 전」) → [직접] 7", load(.fixed(days: 7)).choice, .customDays)
+    report.equal("7일 → 값 그대로", load(.fixed(days: 7)).leadTime, .fixed(days: 7))
+    report.equal("0일 → [직접] 0", load(.fixed(days: 0)).leadTime, .fixed(days: 0))
+    report.equal("5시간 → [시간] 5", load(.fixedHours(5)).leadTime, .fixedHours(5))
+    report.equal("없음 → [없음]", load(.none).choice, .none)
+
+    let legacy = load(.durationBased, 30 * 60)
+    report.equal("옛 소요 30분 → 「기존 값」 칩", legacy.choice, .legacy)
+    report.equal("옛 소요 30분 → 라벨", legacy.legacyLabel, "30분 전 (기존 값)")
+    report.equal("옛 소요 30분 → 저장값 그대로", legacy.leadTime, .durationBased)
+    report.equal("옛 소요 1시간 30분 → 라벨", load(.durationBased, 90 * 60).legacyLabel, "1시간 30분 전 (기존 값)")
+    report.equal("옛 소요 없음 → 알림 없었음 → [없음]", load(.durationBased, nil).choice, .none)
+
+    // 다른 칩을 골랐다가 「기존 값」으로 돌아오면 원래 값
+    var toggled = legacy
+    toggled.choice = .days(1)
+    report.equal("다른 칩 → 그 값", toggled.leadTime, .fixed(days: 1))
+    toggled.choice = .legacy
+    report.equal("「기존 값」으로 돌아옴 → 원래 값", toggled.leadTime, .durationBased)
+
+    // ── 「N일 전」 = 정확히 N×24시간 (BL-022)
+    let due = date(2026, 10, 11, 23, 59)
+    let oneDay = ManagedTask(title: "1일", dueAt: due, leadTime: .fixed(days: 1))
+    report.equal("1일 전 = 24시간 전", oneDay.startDeadline(effectiveDueAt: due, calendar: cal), due.addingTimeInterval(-86_400))
+    let threeHours = ManagedTask(title: "3시간", dueAt: due, leadTime: .fixedHours(3))
+    report.equal("3시간 전", threeHours.startDeadline(effectiveDueAt: due, calendar: cal), due.addingTimeInterval(-3 * 3600))
+
+    // 옛 소요시간 데이터의 알림 시각은 바뀌지 않는다 (원칙 1)
+    let old = ManagedTask(title: "옛 30분", dueAt: due, estimatedDuration: 1800)
+    report.equal("옛 30분 소요 → 마감 30분 전 그대로", old.startDeadline(effectiveDueAt: due, calendar: cal), due.addingTimeInterval(-1800))
+
+    // ── 미리보기 한 줄
+    let now = date(2026, 10, 10, 15, 0)
+    report.equal("미리보기", StartAlarmInput.preview(alarmAt: date(2026, 10, 10, 23, 59), now: now, calendar: cal),
+                 "10월 10일 (토) 오후 11:59에 알림이 울려요")
+    report.equal("이미 지났으면 알리되 막지 않음", StartAlarmInput.preview(alarmAt: date(2026, 10, 10, 9, 0), now: now, calendar: cal),
+                 "알림 시각이 이미 지났어요")
+    report.check("알림 없음 → 줄 숨김", StartAlarmInput.preview(alarmAt: nil, now: now, calendar: cal) == nil)
+}
