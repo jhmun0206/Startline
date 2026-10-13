@@ -37,7 +37,7 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 - `parentEventID` 를 `nil` 로 만드는 곳은 `ManagedTask.detachFromParent` 하나뿐이고,
   이유(`TaskLinkPolicy.DetachReason`)를 인자로 강제한다. 새 경로를 만들지 말 것.
 - **코드를 고쳤으면 `./Tests/run-link-tests.sh` 를 반드시 돌린다.** 연결뿐 아니라 알림·정렬·문구 테스트도
-  들어 있다. (2026-10-13 기준 457건)
+  들어 있다. (2026-10-13 기준 471건)
 - 지금은 **일정을 지워도 딸린 할 일은 남는다** (삭제 확인창에 그렇게 적혀 있다).
   반복·일반 모두 「딸린 미완료 준비도 함께 지운다(완료는 남김)」로 바뀐다. 그래서 BL-040(되돌리기)이 먼저다.
   앱 밖에서 사라진 일정은 지우지 않고 연결 유지 + 알림 보류.
@@ -201,4 +201,4 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `PersistenceReporter.swift` | 명시적 저장. 실패를 화면까지 올린다 |
 | `SheetChrome.swift` | 시트 공통 틀. 닫기 버튼, 더티 확인 |
 | `FeatureFlags.swift` | 기능 플래그 (호버 미리보기·메아리 — 둘 다 꺼짐, 제거 후보) |
-| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-10-13 기준 457건) |
+| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-10-13 기준 471건) |
