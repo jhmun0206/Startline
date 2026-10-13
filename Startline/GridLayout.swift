@@ -309,7 +309,7 @@ nonisolated struct WeekLayout {
             weekEnd: weekEndDay,
             calendar: calendar
         )
-        let taskLanes = assignLanes(taskItems)
+        let taskLanes = assignLanes(taskItems, fillsFromBottom: true)
         let taskStride = metrics.taskBarHeight + metrics.spacing
 
         var eventItems = pendingEvents(
@@ -436,13 +436,23 @@ nonisolated struct WeekLayout {
     }
 
     /// 긴 것부터 자리를 잡아야 짧은 것들이 빈틈에 들어간다.
-    private static func assignLanes(_ items: [PendingItem]) -> [(item: PendingItem, lane: Int)] {
+    ///
+    /// - Parameter fillsFromBottom: 할 일처럼 레인 0이 **맨 아래** 줄인 경우.
+    ///   위에서 아래로 읽을 때 우측 패널과 같은 순서가 되도록 배정 순서를 뒤집는다. (DESIGN_direction 6장 ⑫)
+    ///   - 완료한 것이 먼저 아래 레인을 차지한다 → 완료는 칸 맨 아래, 미완료는 그 위
+    ///   - 같은 그룹·같은 길이·같은 시작 칸이면 패널 순서의 **역순**으로 배정한다 → 읽는 순서는 패널과 같다
+    ///   여러 날 막대가 섞이면 칸마다 레인이 공유되므로 모든 칸에서 완벽히 같을 수는 없다.
+    private static func assignLanes(
+        _ items: [PendingItem],
+        fillsFromBottom: Bool = false
+    ) -> [(item: PendingItem, lane: Int)] {
         let sorted = items.sorted { lhs, rhs in
+            if fillsFromBottom, lhs.isCompleted != rhs.isCompleted { return lhs.isCompleted }
             let lspan = lhs.endColumn - lhs.startColumn
             let rspan = rhs.endColumn - rhs.startColumn
             if lspan != rspan { return lspan > rspan }
             if lhs.startColumn != rhs.startColumn { return lhs.startColumn < rhs.startColumn }
-            return lhs.isOrderedBefore(rhs)
+            return fillsFromBottom ? rhs.isOrderedBefore(lhs) : lhs.isOrderedBefore(rhs)
         }
 
         var placed: [(item: PendingItem, lane: Int)] = []

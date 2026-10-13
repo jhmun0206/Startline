@@ -27,11 +27,11 @@ func testStartMomentText() {
     // ── 같은 날 (3시간 / 마감 23:59) → 시각까지. 지금 그대로.
     let sameDayDue = date(2026, 9, 27, 23, 59)
     let sameDayStart = sameDayDue.addingTimeInterval(-3 * 3600)      // 9/27 20:59
-    report.equal("같은 날 — 시각까지", short(sameDayStart, sameDayDue), "9월 27일 (일) 저녁 8시 59분에 시작")
+    report.equal("같은 날 — 시각까지", short(sameDayStart, sameDayDue), "9월 27일 (일) 오후 8:59에 시작")
     report.equal(
         "같은 날 — 문장",
         sentence(sameDayStart, sameDayDue),
-        "9월 27일 (일) 저녁 8시 59분에 시작해야 해요"
+        "9월 27일 (일) 오후 8:59에 시작해야 해요"
     )
 
     // ── 다른 날, 하루 차이 (24시간 / 마감 9/8 19:00 → 착수 9/7 19:00)
@@ -39,13 +39,13 @@ func testStartMomentText() {
     let d1Start = d1Due.addingTimeInterval(-24 * 3600)
     report.equal("하루 차이 — 날짜만", short(d1Start, d1Due), "9월 7일 (월)에 시작")
     report.equal("하루 차이 — 문장", sentence(d1Start, d1Due), "9월 7일 (월)에 시작해야 해요")
-    report.check("하루 차이 — 시각이 사라졌다", !short(d1Start, d1Due).contains("저녁"))
+    report.check("하루 차이 — 시각이 사라졌다", !short(d1Start, d1Due).contains(":"))
 
     // ── 다른 날, 여러 날 차이 (72시간 → 3일 전)
     let d3Due = date(2026, 10, 10, 16, 0)
     let d3Start = d3Due.addingTimeInterval(-72 * 3600)               // 10/7 16:00
     report.equal("3일 차이 — 날짜만", short(d3Start, d3Due), "10월 7일 (수)에 시작")
-    report.check("3일 차이 — 시각이 없다", !short(d3Start, d3Due).contains("오후"))
+    report.check("3일 차이 — 시각이 없다", !short(d3Start, d3Due).contains(":"))
 
     // ── 오늘이 착수일
     //
@@ -56,7 +56,7 @@ func testStartMomentText() {
     let todayStart = todayDue.addingTimeInterval(-36 * 3600)         // 9/22 04:00
     report.equal("오늘 — 「오늘」로 말한다", short(todayStart, todayDue), "오늘 시작")
     report.equal("오늘 — 문장", sentence(todayStart, todayDue), "오늘 시작해야 해요")
-    report.check("오늘 — 새벽 4시가 새어나오지 않는다", !short(todayStart, todayDue).contains("새벽"))
+    report.check("오늘 — 새벽 4시가 새어나오지 않는다", !short(todayStart, todayDue).contains(":"))
     report.check("오늘 — 「오늘에」가 아니다", !short(todayStart, todayDue).contains("오늘에"))
 
     // ── 내일이 착수일
@@ -73,15 +73,15 @@ func testStartMomentText() {
     let day0 = ManagedTask(title: "당일", dueAt: fixedDue, leadTime: .fixed(days: 0))
     let day0Start = day0.startDeadline(effectiveDueAt: fixedDue, calendar: cal)!
     report.check("fixed(0) — 마감과 같은 날", cal.isDate(day0Start, inSameDayAs: fixedDue))
-    report.equal("fixed(0) — 시각까지", short(day0Start, fixedDue), "9월 30일 (수) 오후 2시에 시작")
+    report.equal("fixed(0) — 시각까지", short(day0Start, fixedDue), "9월 30일 (수) 오후 2:00에 시작")
 
     let day3 = ManagedTask(title: "3일 전", dueAt: fixedDue, leadTime: .fixed(days: 3))
     let day3Start = day3.startDeadline(effectiveDueAt: fixedDue, calendar: cal)!
     report.check("fixed(3) — 마감과 다른 날", !cal.isDate(day3Start, inSameDayAs: fixedDue))
     report.equal("fixed(3) — 날짜만", short(day3Start, fixedDue), "9월 27일 (일)에 시작")
     // 「시작」의 「시」에 걸리지 않도록 시각 표기 자체를 본다.
-    for period in ["새벽", "아침", "오후", "저녁", "밤"] {
-        report.check("fixed(3) — \(period) 표기가 붙지 않는다", !short(day3Start, fixedDue).contains(period))
+    for mark in ["오전", "오후", ":"] {
+        report.check("fixed(3) — 「\(mark)」 시각 표기가 붙지 않는다", !short(day3Start, fixedDue).contains(mark))
     }
 
     // ── 리드타임 none → 착수 시점 자체가 없다

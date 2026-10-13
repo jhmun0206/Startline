@@ -571,7 +571,7 @@ struct EventEditorView: View {
             return "\(StartlineFormat.spokenDay.string(from: start)) 종일"
         }
         let end = event.endDate ?? start
-        return "\(StartlineFormat.spokenDayTime(start)) ~ \(Self.timeFormatter.string(from: end))"
+        return "\(StartlineFormat.spokenDayTime(start)) ~ \(StartlineFormat.spokenTime(end))"
     }
 
     // MARK: - 로드 / 저장 / 삭제
@@ -727,13 +727,6 @@ struct EventEditorView: View {
         draftTasks.removeAll()
         saver.commit(modelContext)
     }
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .startlineDisplay
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 }
 
 // MARK: - 이미 붙어 있는 할 일 한 줄

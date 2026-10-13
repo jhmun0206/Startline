@@ -82,7 +82,7 @@ func testAlarms() {
     let body = NotificationScheduler.message(
         title: "보고서 초안", parentTitle: "[졸프] 전체 미팅", effectiveDueAt: date(2026, 10, 11, 19, 0), calendar: cal
     )
-    report.equal("본문", body, "‘보고서 초안’ ([졸프] 전체 미팅) — 마감 10월 11일 (일) 저녁 7시")
+    report.equal("본문", body, "‘보고서 초안’ ([졸프] 전체 미팅) — 마감 10월 11일 (일) 오후 7:00")
     for word in ["착수", "리드타임", "마감시각", "지금 시작해야", "맞출 수"] {
         report.check("본문에 「\(word)」가 없다", !body.contains(word))
     }

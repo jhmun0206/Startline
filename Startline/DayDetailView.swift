@@ -641,7 +641,7 @@ struct EventRow: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// 종일이면 "종일", 아니면 "HH:mm – HH:mm".
+    /// 종일이면 "종일", 아니면 "오후 4:15 – 오후 6:00" (시스템 12/24시간 설정을 따른다).
     /// 이 날 이전에 시작했거나 이후까지 이어지면 말줄임표로 표시한다.
     private var timeText: String {
         guard let start = event.startDate else { return "-" }
@@ -652,17 +652,10 @@ struct EventRow: View {
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
         let end = event.endDate ?? start
 
-        let startText = start < dayStart ? "…" : Self.timeFormatter.string(from: start)
-        let endText = end >= dayEnd ? "…" : Self.timeFormatter.string(from: end)
+        let startText = start < dayStart ? "…" : StartlineFormat.spokenTime(start, calendar: calendar)
+        let endText = end >= dayEnd ? "…" : StartlineFormat.spokenTime(end, calendar: calendar)
         return "\(startText) – \(endText)"
     }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .startlineDisplay
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
 }
 
 /// 우측 패널의 한 섹션. 머리글 + 내용, 비어 있으면 빈 상태 문구.

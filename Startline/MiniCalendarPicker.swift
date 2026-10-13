@@ -171,7 +171,7 @@ struct MiniCalendarPicker: View {
 
     private func timeText(_ event: EKEvent) -> String {
         guard !event.isAllDay, let start = event.startDate else { return "종일" }
-        return Self.timeFormatter.string(from: start)
+        return StartlineFormat.spokenTime(start, calendar: calendar)
     }
 
     private func same(_ lhs: EKEvent, _ rhs: EKEvent) -> Bool {
@@ -213,13 +213,6 @@ struct MiniCalendarPicker: View {
         let f = DateFormatter()
         f.locale = .startlineDisplay
         f.dateFormat = "M월 d일 (E)"
-        return f
-    }()
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .startlineDisplay
-        f.dateFormat = "HH:mm"
         return f
     }()
 }

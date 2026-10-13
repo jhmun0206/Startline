@@ -729,6 +729,9 @@ enum LinkIntegrityTests {
             default:
                 print("일정·할 일 연결 회귀 테스트")
                 print(String(repeating: "═", count: 60))
+                // 시각 문구 기대값은 12시간 표기 기준이다. 실행하는 Mac 의 설정과 무관하게 고정한다.
+                // 24시간 표기는 testTimeFormat 이 따로 본다.
+                StartlineFormat.hourCycleOverride = false
                 testBasics()
                 testDetachOnlyByUser()
                 testBulk()
@@ -744,6 +747,7 @@ enum LinkIntegrityTests {
                 testAlarms()
                 testSnooze()
                 testPanelText()
+                testTimeFormat()
                 exit(report.finish())
             }
         } catch {

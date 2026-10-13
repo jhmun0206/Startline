@@ -16,40 +16,40 @@ func testPanelText() {
     }
 
     report.equal("오늘·내일", detail(due: date(2026, 10, 11, 19, 0), alarm: date(2026, 10, 10, 19, 0)),
-                 "마감 내일 저녁 7시 · 알림 오늘 저녁 7시")
+                 "마감 내일 오후 7:00 · 알림 오늘 오후 7:00")
     report.equal("다른 날", detail(due: date(2026, 10, 15, 9, 30), alarm: date(2026, 10, 13, 9, 30)),
-                 "마감 10월 15일 (목) 아침 9시 30분 · 알림 10월 13일 (화) 아침 9시 30분")
-    report.equal("알림 없음", detail(due: date(2026, 10, 11, 19, 0), alarm: nil), "마감 내일 저녁 7시")
+                 "마감 10월 15일 (목) 오전 9:30 · 알림 10월 13일 (화) 오전 9:30")
+    report.equal("알림 없음", detail(due: date(2026, 10, 11, 19, 0), alarm: nil), "마감 내일 오후 7:00")
     report.equal("기한 지남 — 알림은 말하지 않음",
                  detail(due: date(2026, 10, 8, 19, 0), alarm: date(2026, 10, 7, 19, 0), missed: true),
-                 "10월 8일 (목) 저녁 7시까지였어요")
+                 "10월 8일 (목) 오후 7:00까지였어요")
     report.equal("기한 지남·오늘", detail(due: date(2026, 10, 10, 9, 0), alarm: nil, missed: true),
-                 "오늘 아침 9시까지였어요")
+                 "오늘 오전 9:00까지였어요")
     report.equal("마감 없음", detail(due: nil, alarm: nil), "마감 없음")
 
     // 예전 소요시간 데이터 — 알림 시각은 마감 − 소요시간으로 해석한 값, 같은 형식
     let legacy = ManagedTask(title: "예전", dueAt: date(2026, 10, 11, 19, 0), estimatedDuration: 1800)
     let legacyAlarm = legacy.startDeadline(effectiveDueAt: legacy.dueAt, calendar: cal)
     report.equal("예전 30분 소요 → 알림 30분 전 (같은 날이라 날짜어는 마감에만)", detail(due: legacy.dueAt, alarm: legacyAlarm),
-                 "마감 내일 저녁 7시 · 알림 저녁 6시 30분")
+                 "마감 내일 오후 7:00 · 알림 오후 6:30")
 
     // ── 같은 날이면 날짜어는 마감 쪽에만 (3e)
     report.equal("같은 날 오늘", detail(due: date(2026, 10, 10, 16, 15), alarm: date(2026, 10, 10, 16, 10)),
-                 "마감 오늘 오후 4시 15분 · 알림 오후 4시 10분")
+                 "마감 오늘 오후 4:15 · 알림 오후 4:10")
     report.equal("같은 날 먼 날짜", detail(due: date(2026, 10, 20, 9, 0), alarm: date(2026, 10, 20, 6, 0)),
-                 "마감 10월 20일 (화) 아침 9시 · 알림 아침 6시")
+                 "마감 10월 20일 (화) 오전 9:00 · 알림 오전 6:00")
 
     // ── 완료한 할 일은 마감만
     let done = TaskTimeText.line(effectiveDueAt: date(2026, 10, 11, 19, 0), alarmAt: date(2026, 10, 10, 19, 0),
                                  isMissed: false, isCompleted: true, now: now, calendar: cal)
-    report.equal("완료 → 마감만", done.plain, "마감 내일 저녁 7시")
+    report.equal("완료 → 마감만", done.plain, "마감 내일 오후 7:00")
     report.check("완료 → 알림 조각 없음", done.alarm == nil)
 
     // ── 두 조각으로 나뉜다 (화면이 다르게 칠할 수 있게)
     let split = TaskTimeText.line(effectiveDueAt: date(2026, 10, 11, 19, 0), alarmAt: date(2026, 10, 10, 19, 0),
                                   isMissed: false, now: now, calendar: cal)
-    report.equal("마감 조각", split.due, "마감 내일 저녁 7시")
-    report.equal("알림 조각", split.alarm, "알림 오늘 저녁 7시")
+    report.equal("마감 조각", split.due, "마감 내일 오후 7:00")
+    report.equal("알림 조각", split.alarm, "알림 오늘 오후 7:00")
 
     // 상태어·소요시간·내부 용어가 나오지 않는다 — 배지와 같은 말을 반복하지 않는다
     let samples = [
@@ -131,10 +131,68 @@ func testPanelText() {
                 gridItem("미완료 10시", dueHour: 10, done: false)],
         availableHeight: 400, calendar: cal
     )
-    // 할 일은 아래에서 위로 쌓는다 — 먼저 오는 것이 맨 아래(가장 큰 y)다.
-    let bottomUp = layout.segments.sorted { $0.y > $1.y }.compactMap { seg -> String? in
-        if case .task(let t) = seg.kind { return t.resolved.task.title }
-        return nil
+    // 할 일 묶음은 칸 아래에 붙지만, **위에서 아래로 읽으면 패널과 같은 순서**다. (3f-1)
+    func topDown(_ layout: WeekLayout) -> [String] {
+        layout.segments.sorted { $0.y < $1.y }.compactMap { seg -> String? in
+            if case .task(let t) = seg.kind { return t.resolved.task.title }
+            return nil
+        }
     }
-    report.equal("그리드 — 아래부터 패널과 같은 순서", bottomUp, ["미완료 10시", "미완료 18시", "완료 9시"])
+    report.equal("그리드 — 위에서 아래로 패널과 같은 순서", topDown(layout), ["미완료 10시", "미완료 18시", "완료 9시"])
+
+    // 완료가 더 긴 막대여도 칸 맨 아래로 간다 — 길이보다 완료 여부가 먼저다.
+    func span(_ title: String, from: Int, to: Int, dueHour: Int, done: Bool) -> GridTaskItem {
+        let end = week[to]
+        let due = cal.date(bySettingHour: dueHour, minute: 0, second: 0, of: end)!
+        return GridTaskItem(resolved: item(title, due: due, done: done), startDay: week[from], endDay: end, isEcho: false)
+    }
+    let mixed = WeekLayout.build(
+        days: week, dayEvents: [:],
+        tasks: [span("완료 사흘", from: 2, to: 4, dueHour: 9, done: true),
+                span("미완료 하루", from: 3, to: 3, dueHour: 12, done: false)],
+        availableHeight: 400, calendar: cal
+    )
+    report.equal("그리드 — 긴 완료 막대도 미완료 아래", topDown(mixed), ["미완료 하루", "완료 사흘"])
+
+    // 일정은 여전히 위에서부터, 할 일 묶음은 여전히 칸 아래에 붙는다.
+    let lone = WeekLayout.build(
+        days: week, dayEvents: [:],
+        tasks: [gridItem("혼자", dueHour: 9, done: false)],
+        availableHeight: 400, calendar: cal
+    )
+    let loneY = lone.segments.first?.y ?? 0
+    let maxY = layout.segments.map(\.y).max() ?? -1
+    report.check("그리드 — 할 일이 하나여도 칸 맨 아래 줄", loneY == maxY)
+}
+
+func testTimeFormat() {
+    report.begin("시각 형식 — 시스템 12/24시간 (3f-2)")
+    let saved = StartlineFormat.hourCycleOverride
+    defer { StartlineFormat.hourCycleOverride = saved }
+
+    let afternoon = date(2026, 10, 11, 16, 15)
+    let morning = date(2026, 10, 11, 9, 0)
+    let midnight = date(2026, 10, 11, 0, 5)
+
+    StartlineFormat.hourCycleOverride = false
+    report.equal("12시간 — 오후", StartlineFormat.spokenTime(afternoon, calendar: cal), "오후 4:15")
+    report.equal("12시간 — 오전 정각", StartlineFormat.spokenTime(morning, calendar: cal), "오전 9:00")
+    report.equal("12시간 — 자정 직후", StartlineFormat.spokenTime(midnight, calendar: cal), "오전 12:05")
+    report.equal("12시간 — 날짜와 함께", StartlineFormat.spokenDayTime(afternoon, calendar: cal), "10월 11일 (일) 오후 4:15")
+
+    StartlineFormat.hourCycleOverride = true
+    report.equal("24시간 — 오후", StartlineFormat.spokenTime(afternoon, calendar: cal), "16:15")
+    report.equal("24시간 — 오전 정각", StartlineFormat.spokenTime(morning, calendar: cal), "09:00")
+    report.equal("24시간 — 자정 직후", StartlineFormat.spokenTime(midnight, calendar: cal), "00:05")
+    report.equal(
+        "24시간 — 할 일 행도 같은 함수",
+        TaskTimeText.detail(effectiveDueAt: date(2026, 10, 11, 19, 0), alarmAt: date(2026, 10, 10, 19, 0),
+                            isMissed: false, now: date(2026, 10, 10, 15, 0), calendar: cal),
+        "마감 내일 19:00 · 알림 오늘 19:00"
+    )
+    report.equal(
+        "24시간 — 알림 본문도 같은 함수",
+        NotificationScheduler.message(title: "보고서", parentTitle: nil, effectiveDueAt: date(2026, 10, 11, 19, 0), calendar: cal),
+        "‘보고서’ — 마감 10월 11일 (일) 19:00"
+    )
 }

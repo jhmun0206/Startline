@@ -423,30 +423,38 @@ nonisolated enum StartlineFormat {
         return formatter
     }()
 
-    /// "9월 27일 (일) 저녁 8시 59분" — 사람이 말하는 방식으로 시각을 적는다.
+    /// "9월 27일 (일) 오후 8:59" / "9월 27일 (일) 20:59"
     /// 명세서 5.4 — 남은 시간을 환산한 숫자는 넣지 않는다. 시점만 말한다.
     static func spokenDayTime(_ date: Date, calendar: Calendar = .current) -> String {
         "\(spokenDay.string(from: date)) \(spokenTime(date, calendar: calendar))"
     }
 
-    /// "저녁 8시 59분" — 날짜 없이 시각만.
+    /// 날짜 없이 시각만. **앱의 모든 시각은 이 함수를 거친다.** (DESIGN_direction 6장 ⑪)
+    ///
+    /// macOS 시스템 설정의 12/24시간을 따르는 짧은 형식이다.
+    /// 12시간이면 "오후 8:59", 24시간이면 "20:59".
+    ///
+    /// 예전에는 "저녁 8시 59분"처럼 말하는 투로 적었고, 일정 카드는 "20:59" 로 따로 적어
+    /// 같은 패널 안에서 형식이 섞였다. 형식을 하드코딩하지 않고 템플릿으로 만든다.
     static func spokenTime(_ date: Date, calendar: Calendar = .current) -> String {
-        let hour24 = calendar.component(.hour, from: date)
-        let minute = calendar.component(.minute, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = .startlineDisplay
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate(uses24HourClock ? "Hmm" : "hmma")
+        return formatter.string(from: date)
+    }
 
-        let period: String
-        switch hour24 {
-        case 0..<6: period = "새벽"
-        case 6..<12: period = "아침"
-        case 12..<18: period = "오후"
-        case 18..<21: period = "저녁"
-        default: period = "밤"
-        }
+    /// 검증에서 12/24시간을 고정할 때만 쓴다. 앱에서는 늘 `nil` 이다.
+    nonisolated(unsafe) static var hourCycleOverride: Bool?
 
-        let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-        return minute == 0
-            ? "\(period) \(hour12)시"
-            : "\(period) \(hour12)시 \(minute)분"
+    /// 시스템이 24시간 표기인지.
+    ///
+    /// 앱은 화면 언어를 ko_KR 로 고정하지만, 12/24시간은 사용자의 시스템 설정을 따른다.
+    /// 그래서 고정 로케일이 아니라 현재 로케일의 시 표기(`j`)를 본다.
+    static var uses24HourClock: Bool {
+        if let hourCycleOverride { return hourCycleOverride }
+        let pattern = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent) ?? ""
+        return pattern.contains("H") || pattern.contains("k")
     }
 
     /// 소요시간을 "1시간 30분" 형태로.

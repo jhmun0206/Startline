@@ -244,13 +244,6 @@ struct TaskRow: View {
         return until
     }
 
-    private static let snoozeTimeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .startlineDisplay
-        f.dateFormat = "a h:mm"
-        return f
-    }()
-
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
             if isNested {
@@ -287,7 +280,7 @@ struct TaskRow: View {
                 // 회색 줄과 같은 모양이면 묻히므로 배경을 깐 작은 칩으로 둔다.
                 // 색은 중립 — 「늦음」(빨강)·「오늘 시작」(주황) 배지와 헷갈리지 않게.
                 if let pendingSnooze {
-                    SnoozeChip(text: "30분 미뤄짐 · \(Self.snoozeTimeFormatter.string(from: pendingSnooze))에 다시 알림")
+                    SnoozeChip(text: "30분 미뤄짐 · \(StartlineFormat.spokenTime(pendingSnooze))에 다시 알림")
                 }
             }
             // 체크박스는 제외하고 본문만 눌러야 수정 시트가 열린다.
