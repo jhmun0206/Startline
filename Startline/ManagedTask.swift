@@ -36,6 +36,8 @@ enum LeadTime: Equatable {
     case fixed(days: Int)
     /// N시간 전.
     case fixedHours(Int)
+    /// N분 전. 시작 알림 칩의 「30분」과 [직접]의 분 단위. (2026-10-13 추가)
+    case fixedMinutes(Int)
     /// 리드타임 없음.
     case none
 }
@@ -48,6 +50,8 @@ enum LeadTimeKind: String, Codable, CaseIterable {
     case durationBased
     case fixedDays
     case fixedHours
+    /// 2026-10-13 추가. 새 원시값이라 기존 행에는 영향이 없다.
+    case fixedMinutes
     case none
 
     var label: String {
@@ -55,6 +59,7 @@ enum LeadTimeKind: String, Codable, CaseIterable {
         case .durationBased: return "소요시간 역산"
         case .fixedDays: return "N일 전"
         case .fixedHours: return "N시간 전"
+        case .fixedMinutes: return "N분 전"
         case .none: return "없음"
         }
     }
@@ -178,6 +183,7 @@ final class ManagedTask {
             case .durationBased: return .durationBased
             case .fixedDays: return .fixed(days: leadTimeValue)
             case .fixedHours: return .fixedHours(leadTimeValue)
+            case .fixedMinutes: return .fixedMinutes(leadTimeValue)
             case .none: return .none
             }
         }
@@ -189,6 +195,9 @@ final class ManagedTask {
             case .fixed(let days):
                 leadTimeKind = .fixedDays
                 leadTimeValue = days
+            case .fixedMinutes(let minutes):
+                leadTimeKind = .fixedMinutes
+                leadTimeValue = minutes
             case .fixedHours(let hours):
                 leadTimeKind = .fixedHours
                 leadTimeValue = hours
@@ -250,6 +259,9 @@ extension ManagedTask {
 
         case .fixedHours(let hours):
             return calendar.date(byAdding: .hour, value: -hours, to: due)
+
+        case .fixedMinutes(let minutes):
+            return due.addingTimeInterval(-TimeInterval(minutes) * 60)
 
         case .none:
             return nil

@@ -302,15 +302,38 @@ struct SheetChip: View {
 ///
 /// 알림 시각 = 마감 − 여기서 고른 오프셋. **앱이 보정하지 않는다.** (DESIGN_direction 5장 ②)
 /// 모든 값은 마감 기준 상대값이다. 절대 날짜 알림은 없다.
+///
+/// 2026-10-13 개정: 자주 쓰는 값은 **한 번 누르면 끝나는 프리셋**으로 둔다.
+/// 처음 안([시간]을 누르고 숫자 입력)은 한 단계가 더 있었고 분 단위를 쓸 수 없었다.
 struct StartAlarmInput: Equatable {
 
+    /// [직접] 입력의 단위.
+    enum Unit: Hashable, CaseIterable {
+        case minutes, hours, days
+
+        var label: String {
+            switch self {
+            case .minutes: return "분"
+            case .hours: return "시간"
+            case .days: return "일"
+            }
+        }
+
+        /// [직접]에 적을 수 있는 범위. 「0일」은 마감 시각 그대로다.
+        var range: ClosedRange<Int> {
+            switch self {
+            case .minutes: return 1...1440
+            case .hours: return 1...72
+            case .days: return 0...365
+            }
+        }
+    }
+
     enum Choice: Hashable {
-        /// [시간] — 시간 수 입력칸
-        case hours
-        /// [1일] [2일] [3일]
-        case days(Int)
-        /// [직접] — 일 수 입력칸
-        case customDays
+        /// 한 번 누르면 끝나는 칩. [30분] [1시간] [3시간] [1일] [3일]
+        case preset(Unit, Int)
+        /// [직접] — 숫자 + 단위
+        case custom
         /// [없음]
         case none
         /// 칩으로 나타낼 수 없는 기존 값. 사용자가 다른 칩을 고르기 전까지 그대로 둔다. (원칙 1)
@@ -318,31 +341,46 @@ struct StartAlarmInput: Equatable {
     }
 
     var choice: Choice
-    var hours = 3
-    var customDays = 7
+    var customValue = 2
+    var customUnit: Unit = .days
     /// `choice == .legacy` 일 때 저장할 원래 값.
     var legacyLeadTime: LeadTime?
     /// 「30분 전 (기존 값)」
     var legacyLabel: String?
 
-    static let presetDays = [1, 2, 3]
-    static let hoursRange = 1...72
-    static let daysRange = 0...365
+    static let presets: [Choice] = [
+        .preset(.minutes, 30), .preset(.hours, 1), .preset(.hours, 3), .preset(.days, 1), .preset(.days, 3)
+    ]
 
     /// 새 할 일의 기본값. 할 일 시트와 일정 폼 초안 행이 같다.
-    static let `default` = StartAlarmInput(choice: .days(1))
+    /// 1일이 아니라 3시간이다 — 새 할 일의 기본 마감이 오늘 23:59 라, 1일이면 처음부터 지난 시각이 된다.
+    static let `default` = StartAlarmInput(choice: .preset(.hours, 3))
+
+    static func label(_ unit: Unit, _ value: Int) -> String {
+        "\(value)\(unit.label)"
+    }
+
+    static func leadTime(_ unit: Unit, _ value: Int) -> LeadTime {
+        switch unit {
+        case .minutes: return .fixedMinutes(value)
+        case .hours: return .fixedHours(value)
+        case .days: return .fixed(days: value)
+        }
+    }
 
     /// 저장된 값을 칩 상태로. **가까운 칩으로 바꾸지 않는다.** (원칙 1)
     static func from(leadTime: LeadTime, estimatedDuration: TimeInterval?) -> StartAlarmInput {
+        func fitted(_ unit: Unit, _ value: Int) -> StartAlarmInput {
+            presets.contains(.preset(unit, value))
+                ? StartAlarmInput(choice: .preset(unit, value))
+                : StartAlarmInput(choice: .custom, customValue: value, customUnit: unit)
+        }
+
         switch leadTime {
-        case .fixed(let days) where presetDays.contains(days):
-            return StartAlarmInput(choice: .days(days))
-        case .fixed(let days):
-            return StartAlarmInput(choice: .customDays, customDays: days)
-        case .fixedHours(let hours):
-            return StartAlarmInput(choice: .hours, hours: hours)
-        case .none:
-            return StartAlarmInput(choice: .none)
+        case .fixed(let days): return fitted(.days, days)
+        case .fixedHours(let hours): return fitted(.hours, hours)
+        case .fixedMinutes(let minutes): return fitted(.minutes, minutes)
+        case .none: return StartAlarmInput(choice: .none)
         case .durationBased:
             // 옛 소요시간 데이터. 알림 시각은 마감 − 소요시간으로 읽는다(DESIGN 5장 ④).
             // 소요시간이 없으면 알림도 없었다.
@@ -360,9 +398,8 @@ struct StartAlarmInput: Equatable {
     /// 저장할 값. 범위를 벗어났으면 `nil`.
     var leadTime: LeadTime? {
         switch choice {
-        case .hours: return Self.hoursRange.contains(hours) ? .fixedHours(hours) : nil
-        case .days(let days): return .fixed(days: days)
-        case .customDays: return Self.daysRange.contains(customDays) ? .fixed(days: customDays) : nil
+        case .preset(let unit, let value): return Self.leadTime(unit, value)
+        case .custom: return customUnit.range.contains(customValue) ? Self.leadTime(customUnit, customValue) : nil
         case .none: return LeadTime.none
         case .legacy: return legacyLeadTime
         }
@@ -370,14 +407,9 @@ struct StartAlarmInput: Equatable {
 
     /// 범위를 벗어났을 때 한 줄. 이게 있으면 저장 버튼을 끈다. (BL-016)
     var invalidReason: String? {
-        switch choice {
-        case .hours where !Self.hoursRange.contains(hours):
-            return "시간은 \(Self.hoursRange.lowerBound)~\(Self.hoursRange.upperBound) 사이로 적어 주세요."
-        case .customDays where !Self.daysRange.contains(customDays):
-            return "일 수는 \(Self.daysRange.lowerBound)~\(Self.daysRange.upperBound) 사이로 적어 주세요."
-        default:
-            return nil
-        }
+        guard choice == .custom, !customUnit.range.contains(customValue) else { return nil }
+        let range = customUnit.range
+        return "\(range.lowerBound)~\(range.upperBound)\(customUnit.label) 사이로 적어 주세요."
     }
 
     /// 칩 아래 미리보기 한 줄. 「없음」이거나 마감·알림을 알 수 없으면 `nil` — 줄을 숨긴다.
@@ -390,7 +422,7 @@ struct StartAlarmInput: Equatable {
     }
 }
 
-/// 「시작 알림」 칩 한 줄 + 입력칸 + 미리보기.
+/// 「시작 알림」 칩 한 줄 + [직접] 입력 줄 + 미리보기.
 ///
 /// **할 일 시트와 일정 폼 초안 행이 같은 이 부품을 쓴다.** 스테퍼는 쓰지 않는다.
 /// 「언제까지」(마감) 칩과 헷갈리지 않도록 라벨을 「시작 알림」으로 둔다.
@@ -400,34 +432,41 @@ struct StartAlarmChips: View {
     let alarmAt: Date?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 4) {
                 Text("시작 알림")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                SheetChip(label: "시간", isOn: input.choice == .hours) { input.choice = .hours }
-                ForEach(StartAlarmInput.presetDays, id: \.self) { days in
-                    SheetChip(label: "\(days)일", isOn: input.choice == .days(days)) { input.choice = .days(days) }
+                ForEach(StartAlarmInput.presets, id: \.self) { preset in
+                    if case .preset(let unit, let value) = preset {
+                        SheetChip(label: StartAlarmInput.label(unit, value), isOn: input.choice == preset) {
+                            input.choice = preset
+                        }
+                    }
                 }
-                SheetChip(label: "직접", isOn: input.choice == .customDays) { input.choice = .customDays }
+                SheetChip(label: "직접", isOn: input.choice == .custom) { input.choice = .custom }
                 SheetChip(label: "없음", isOn: input.choice == .none) { input.choice = .none }
                 if let legacyLabel = input.legacyLabel {
                     SheetChip(label: legacyLabel, isOn: input.choice == .legacy) { input.choice = .legacy }
                 }
 
-                switch input.choice {
-                case .hours:
-                    numberField($input.hours)
-                    Text("시간 전").font(.caption2).foregroundStyle(.secondary)
-                case .customDays:
-                    numberField($input.customDays)
-                    Text("일 전").font(.caption2).foregroundStyle(.secondary)
-                default:
-                    EmptyView()
-                }
-
                 Spacer(minLength: 0)
+            }
+
+            // 칩 줄이 넘치지 않도록 [직접] 입력은 아랫줄에 연다.
+            if input.choice == .custom {
+                HStack(spacing: 4) {
+                    TextField("0", value: $input.customValue, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 48)
+                        .font(.caption)
+                    ForEach(StartAlarmInput.Unit.allCases, id: \.self) { unit in
+                        SheetChip(label: unit.label, isOn: input.customUnit == unit) { input.customUnit = unit }
+                    }
+                    Text("전").font(.caption2).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
             }
 
             if let reason = input.invalidReason {
@@ -441,14 +480,6 @@ struct StartAlarmChips: View {
                     .foregroundStyle(shownAlarm <= Date() ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
             }
         }
-    }
-
-    private func numberField(_ value: Binding<Int>) -> some View {
-        TextField("0", value: value, format: .number)
-            .textFieldStyle(.plain)
-            .frame(width: 30)
-            .multilineTextAlignment(.trailing)
-            .font(.caption)
     }
 }
 
