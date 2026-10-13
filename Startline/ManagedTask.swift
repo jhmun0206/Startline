@@ -38,6 +38,9 @@ enum LeadTime: Equatable {
     case fixedHours(Int)
     /// N분 전. 시작 알림 칩의 「30분」과 [직접]의 분 단위. (2026-10-13 추가)
     case fixedMinutes(Int)
+    /// 마감 날짜에서 N일 전 날의 오전 9시. 종일 일정에 딸린 할 일용. (2026-10-13 추가, DESIGN 7장 ⑰)
+    /// 종일 일정에는 시각이 없어 「몇 시간 전」이 뜻이 없다. 칩 이름에 시각이 적혀 있고 사용자가 고른다.
+    case morning(daysBefore: Int)
     /// 리드타임 없음.
     case none
 }
@@ -52,6 +55,8 @@ enum LeadTimeKind: String, Codable, CaseIterable {
     case fixedHours
     /// 2026-10-13 추가. 새 원시값이라 기존 행에는 영향이 없다.
     case fixedMinutes
+    /// 2026-10-13 추가. 「N일 전 오전 9시」.
+    case morning
     case none
 
     var label: String {
@@ -60,6 +65,7 @@ enum LeadTimeKind: String, Codable, CaseIterable {
         case .fixedDays: return "N일 전"
         case .fixedHours: return "N시간 전"
         case .fixedMinutes: return "N분 전"
+        case .morning: return "N일 전 오전 9시"
         case .none: return "없음"
         }
     }
@@ -184,6 +190,7 @@ final class ManagedTask {
             case .fixedDays: return .fixed(days: leadTimeValue)
             case .fixedHours: return .fixedHours(leadTimeValue)
             case .fixedMinutes: return .fixedMinutes(leadTimeValue)
+            case .morning: return .morning(daysBefore: leadTimeValue)
             case .none: return .none
             }
         }
@@ -198,6 +205,9 @@ final class ManagedTask {
             case .fixedMinutes(let minutes):
                 leadTimeKind = .fixedMinutes
                 leadTimeValue = minutes
+            case .morning(let days):
+                leadTimeKind = .morning
+                leadTimeValue = days
             case .fixedHours(let hours):
                 leadTimeKind = .fixedHours
                 leadTimeValue = hours
@@ -263,9 +273,25 @@ extension ManagedTask {
         case .fixedMinutes(let minutes):
             return due.addingTimeInterval(-TimeInterval(minutes) * 60)
 
+        case .morning(let days):
+            // 마감이 든 날에서 N일 전 날의 09:00. 날짜를 세는 일이라 캘린더 연산을 쓴다.
+            let dueDay = calendar.startOfDay(for: due)
+            guard let day = calendar.date(byAdding: .day, value: -days, to: dueDay) else { return nil }
+            return calendar.date(bySettingHour: Self.morningHour, minute: 0, second: 0, of: day)
+
         case .none:
             return nil
         }
+    }
+
+    /// 「N일 전 오전 9시」의 시각. 칩 이름에 적힌 것과 같아야 한다.
+    nonisolated static let morningHour = 9
+
+    /// 일정에 딸린 할 일의 마감 = 부모 시작 + 이 값. **사용자가 고르지 않는다.** (DESIGN 7장 ⑰)
+    /// - 시각 일정: 0 — 일정 시작이 마감
+    /// - 종일 일정: +23시간 59분 — 그날 밤이 마감. 접수일·생일처럼 그날 하는 일이 흔하다
+    nonisolated static func attachedDeadlineOffset(allDay: Bool) -> TimeInterval {
+        allDay ? 24 * 60 * 60 - 60 : 0
     }
 
     /// 저장된 `dueAt` 만으로 계산하는 편의 메서드.

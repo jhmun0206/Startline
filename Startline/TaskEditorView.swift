@@ -48,10 +48,13 @@ struct TaskEditorView: View {
 
     /// 부모로 고른 일정.
     @State private var parentEvent: EKEvent?
-    /// 부모 일정 시작 기준 며칠 전인지.
-    @State private var daysBeforeParent = 1
-    /// 「며칠 전까지」의 직접 입력 줄을 펼쳤는지. 칩에 없는 값을 불러오면 켜진다.
-    @State private var isEnteringCustomDays = false
+    /// 불러온 할 일의 부모 기준 오프셋이 새 규칙과 다를 때(예: 예전 「1일 전까지」) 그대로 지킨다. (원칙 1)
+    /// 사용자가 **다른 일정을 고르면** 새 규칙을 따른다.
+    @State private var keptOffset: TimeInterval?
+    /// 불러온 부모. 다른 일정을 골랐는지 가릴 때 쓴다.
+    @State private var loadedParentKey: String?
+    /// 지금 맥락(특정 날짜 / 시각 일정 / 종일 일정)의 기본 알림. 맥락이 바뀌면 손대지 않은 칩만 새 기본값으로 옮긴다.
+    @State private var contextDefault = StartAlarmInput.default
 
     private var isEditing: Bool { task != nil }
 
@@ -120,6 +123,8 @@ struct TaskEditorView: View {
         }
         .frame(width: SheetMetrics.width)
         .onAppear(perform: load)
+        .onChange(of: dueMode) { _, _ in contextDidChange() }
+        .onChange(of: parentKey) { _, _ in contextDidChange() }
         .alert("이 할 일을 지울까요?", isPresented: $isConfirmingDelete) {
             Button("지우기", role: .destructive) { delete() }
             Button("그만두기", role: .cancel) {}
@@ -186,12 +191,10 @@ struct TaskEditorView: View {
                     Spacer(minLength: 6)
                 }
 
-                // 일정 폼의 초안 행과 **같은 부품**을 쓴다. 추가와 수정이 어긋나지 않게.
-                DaysBeforeChips(
-                    label: "언제까지",
-                    daysBefore: $daysBeforeParent,
-                    isEnteringCustom: $isEnteringCustomDays
-                )
+                // 마감은 일정이 정한다. 고르지 않고 보여만 준다. (DESIGN 7장 ⑰)
+                Text(deadlineNote(for: parentEvent))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         } else {
             Text("위 달력에서 일정을 하나 고르세요.")
@@ -200,9 +203,54 @@ struct TaskEditorView: View {
         }
     }
 
-    /// 부모 시작시각 기준 상대 마감. 음수가 "며칠 전". (명세서 4.1)
+    /// 부모 시작시각 기준 상대 마감. (명세서 4.1)
+    ///
+    /// 2026-10-13부터 사용자가 고르지 않는다. (DESIGN 7장 ⑰)
+    /// - 시각 일정: 0 — 일정 시작이 마감
+    /// - 종일 일정: +23시간 59분 — 그날 밤이 마감 (그날 하는 일이 흔하다)
+    /// - 예전 「N일 전까지」로 저장된 값은 다른 일정을 고르기 전까지 그대로 둔다
     private var offsetFromParent: TimeInterval {
-        -TimeInterval(daysBeforeParent) * 24 * 60 * 60
+        if let keptOffset { return keptOffset }
+        return ManagedTask.attachedDeadlineOffset(allDay: parentEvent?.isAllDay == true)
+    }
+
+    /// 「마감: 일정 시작 전까지」 / 「마감: 10월 13일 (화) 하루 안에」 / 「마감: 10월 12일 (월) 오전 12:00 (기존 값)」
+    private func deadlineNote(for event: EKEvent) -> String {
+        guard let start = event.startDate else { return "" }
+        if keptOffset != nil {
+            return "마감: \(StartlineFormat.spokenDayTime(start.addingTimeInterval(offsetFromParent))) (기존 값)"
+        }
+        return event.isAllDay
+            ? "마감: \(StartlineFormat.spokenDay.string(from: start)) 하루 안에"
+            : "마감: 일정 시작 전까지"
+    }
+
+    /// 부모가 바뀌었는지 가리는 열쇠. 같은 반복 일정의 다른 회차도 다른 부모다.
+    private var parentKey: String? {
+        guard let parentEvent else { return nil }
+        return "\(parentEvent.eventIdentifier ?? "")|\(parentEvent.startDate?.timeIntervalSince1970 ?? 0)"
+    }
+
+    /// 지금 맥락의 기본 알림.
+    private var currentContextDefault: StartAlarmInput {
+        switch dueMode {
+        case .specificDate: return .default
+        case .attachedToEvent: return .attachedDefault(allDay: parentEvent?.isAllDay == true)
+        }
+    }
+
+    /// 「특정 날짜 ↔ 일정에 맞춰」나 부모 일정이 바뀌었을 때.
+    ///
+    /// - 다른 일정을 골랐으면 예전 오프셋을 더는 지키지 않는다.
+    /// - 칩 묶음(시각/종일)이 바뀌었거나 칩을 아직 건드리지 않았으면 새 맥락의 기본값으로 옮긴다.
+    ///   사용자가 고른 값은 묶음이 같으면 그대로 둔다.
+    private func contextDidChange() {
+        if parentKey != loadedParentKey { keptOffset = nil }
+        let next = currentContextDefault
+        if alarmInput.style != next.style || alarmInput == contextDefault {
+            alarmInput = next
+        }
+        contextDefault = next
     }
 
     // MARK: - 시작 알림
@@ -259,16 +307,21 @@ struct TaskEditorView: View {
                 id: parentEventID,
                 occurrenceDate: task.parentOccurrenceDate
             )
-            if let offset = task.offsetFromParent {
-                daysBeforeParent = max(0, Int((-offset / (24 * 60 * 60)).rounded()))
-                // 칩에 없는 값(예: 5일 전)이면 「직접」을 켜 그 값을 그대로 보여준다.
-                // 가까운 칩으로 바꾸지 않는다. (원칙 1)
-                isEnteringCustomDays = DaysBeforeChips.needsCustom(for: daysBeforeParent)
+            loadedParentKey = parentKey
+            // 새 규칙과 다른 오프셋(예전 「N일 전까지」)은 그대로 지킨다. 부모를 못 찾았어도 마찬가지다.
+            if let offset = task.offsetFromParent,
+               parentEvent.map({ offset != ManagedTask.attachedDeadlineOffset(allDay: $0.isAllDay) }) ?? true {
+                keptOffset = offset
             }
         }
 
-        // 저장된 값을 칩으로 되돌린다. 칩에 없는 값은 「기존 값」 칩으로 그대로 보존한다.
-        alarmInput = StartAlarmInput.from(leadTime: task.leadTime, estimatedDuration: task.estimatedDuration)
+        // 저장된 값을 칩으로 되돌린다. 지금 칩 묶음에 없는 값은 「기존 값」 칩으로 그대로 보존한다.
+        contextDefault = currentContextDefault
+        alarmInput = StartAlarmInput.from(
+            leadTime: task.leadTime,
+            estimatedDuration: task.estimatedDuration,
+            style: contextDefault.style
+        )
         loadedAlarmInput = alarmInput
     }
 

@@ -534,6 +534,9 @@ struct EventEditorView: View {
             let trimmed = edit.title.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { edit.task.title = trimmed }
 
+            // 「며칠 전까지」를 실제로 바꿨을 때만 오프셋을 쓴다. 제목만 고쳤는데 다시 쓰면
+            // 일 단위가 아닌 오프셋(종일 일정의 +23:59, DESIGN 7장 ⑰)이 조용히 0시로 바뀐다. (원칙 1)
+            guard edit.daysBefore != edit.originalDaysBefore else { continue }
             let offset = -TimeInterval(edit.daysBefore) * dayLength
             edit.task.offsetFromParent = offset
             edit.task.dueAt = eventStart.addingTimeInterval(offset)

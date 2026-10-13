@@ -102,7 +102,7 @@ func testStartAlarmInput() {
 
     // ── 기본값과 원탭 프리셋
     report.equal("기본값 3시간", StartAlarmInput.default.leadTime, .fixedHours(3))
-    report.equal("프리셋 다섯 개", StartAlarmInput.presets.count, 5)
+    report.equal("프리셋 다섯 개", StartAlarmInput.relativePresets.count, 5)
     report.equal("[30분]", StartAlarmInput(choice: .preset(.minutes, 30)).leadTime, .fixedMinutes(30))
     report.equal("[1시간]", StartAlarmInput(choice: .preset(.hours, 1)).leadTime, .fixedHours(1))
     report.equal("[1일]", StartAlarmInput(choice: .preset(.days, 1)).leadTime, .fixed(days: 1))
@@ -125,8 +125,8 @@ func testStartAlarmInput() {
     report.check("프리셋이면 입력칸 값은 무시", StartAlarmInput(choice: .preset(.days, 1), customValue: 999).invalidReason == nil)
 
     // ── 불러오기 — 가까운 칩으로 바꾸지 않는다 (원칙 1)
-    func load(_ lead: LeadTime, _ duration: TimeInterval? = nil) -> StartAlarmInput {
-        StartAlarmInput.from(leadTime: lead, estimatedDuration: duration)
+    func load(_ lead: LeadTime, _ duration: TimeInterval? = nil, style: StartAlarmInput.Style = .relative) -> StartAlarmInput {
+        StartAlarmInput.from(leadTime: lead, estimatedDuration: duration, style: style)
     }
     report.equal("3일 → [3일]", load(.fixed(days: 3)).choice, .preset(.days, 3))
     report.equal("30분 → [30분]", load(.fixedMinutes(30)).choice, .preset(.minutes, 30))
@@ -177,6 +177,45 @@ func testStartAlarmInput() {
     let defaultAlarm = ManagedTask(title: "오늘", dueAt: todayDue, leadTime: StartAlarmInput.default.leadTime!)
         .startDeadline(effectiveDueAt: todayDue, calendar: cal)
     report.check("기본값 — 오늘 23:59 마감이면 알림은 아직 안 지났다", (defaultAlarm ?? now) > now)
+
+    // ── 딸린 할 일 (DESIGN 7장 ⑰)
+    report.begin("딸린 할 일 — 일정 기준 알림")
+    report.equal("시각 일정 기본값 1일", StartAlarmInput.attachedDefault(allDay: false).leadTime, .fixed(days: 1))
+    report.equal("종일 일정 기본값 당일 오전 9시", StartAlarmInput.attachedDefault(allDay: true).leadTime, .morning(daysBefore: 0))
+    report.equal("종일 일정 칩 묶음", StartAlarmInput.presets(for: .allDayMorning).map(StartAlarmChips.chipLabel),
+                 ["당일 오전 9시", "1일 전 오전 9시", "3일 전 오전 9시"])
+    report.equal("종일 [직접] 7 → 7일 전 오전 9시",
+                 StartAlarmInput(style: .allDayMorning, choice: .custom, customValue: 7).leadTime, .morning(daysBefore: 7))
+    report.check("종일 [직접] 366 → 저장 불가",
+                 StartAlarmInput(style: .allDayMorning, choice: .custom, customValue: 366).invalidReason != nil)
+
+    // 마감은 일정이 정한다
+    report.equal("시각 일정 → 마감 = 일정 시작", ManagedTask.attachedDeadlineOffset(allDay: false), 0)
+    let allDayStart = date(2026, 10, 13, 0, 0)
+    let allDayDue = allDayStart.addingTimeInterval(ManagedTask.attachedDeadlineOffset(allDay: true))
+    report.equal("종일 일정 → 마감 = 그날 23:59", allDayDue, date(2026, 10, 13, 23, 59))
+
+    // 13일 종일 일정: 당일 오전 9시 / 1일 전 오전 9시
+    func morningAlarm(_ days: Int) -> Date? {
+        ManagedTask(title: "m", dueAt: allDayDue, leadTime: .morning(daysBefore: days))
+            .startDeadline(effectiveDueAt: allDayDue, calendar: cal)
+    }
+    report.equal("당일 오전 9시", morningAlarm(0), date(2026, 10, 13, 9, 0))
+    report.equal("1일 전 오전 9시", morningAlarm(1), date(2026, 10, 12, 9, 0))
+    report.equal("3일 전 오전 9시", morningAlarm(3), date(2026, 10, 10, 9, 0))
+    let morningTask = ManagedTask(title: "왕복", dueAt: allDayDue, leadTime: .morning(daysBefore: 1))
+    report.equal("N일 전 오전 9시 저장 왕복", morningTask.leadTime, .morning(daysBefore: 1))
+
+    // 불러오기 — 칩 묶음에 맞으면 그 칩, 아니면 「기존 값」으로 보존 (원칙 1)
+    report.equal("종일 + 1일 전 오전 9시 → 칩", load(.morning(daysBefore: 1), style: .allDayMorning).choice, .morning(1))
+    report.equal("종일 + 5일 전 오전 9시 → [직접]", load(.morning(daysBefore: 5), style: .allDayMorning).leadTime, .morning(daysBefore: 5))
+    let crossed = load(.fixedHours(3), style: .allDayMorning)
+    report.equal("종일 일정에 붙은 「3시간 전」 → 기존 값", crossed.choice, .legacy)
+    report.equal("종일 일정에 붙은 「3시간 전」 → 라벨", crossed.legacyLabel, "3시간 전 (기존 값)")
+    report.equal("종일 일정에 붙은 「3시간 전」 → 저장값 그대로", crossed.leadTime, .fixedHours(3))
+    let crossedBack = load(.morning(daysBefore: 1), style: .relative)
+    report.equal("시각 일정에 붙은 「1일 전 오전 9시」 → 기존 값", crossedBack.legacyLabel, "1일 전 오전 9시 (기존 값)")
+    report.equal("… 저장값 그대로", crossedBack.leadTime, .morning(daysBefore: 1))
 
     // ── 미리보기 한 줄
     report.equal("미리보기", StartAlarmInput.preview(alarmAt: date(2026, 10, 10, 20, 59), now: now, calendar: cal),
