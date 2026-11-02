@@ -3,17 +3,18 @@
 ## 이 앱이 뭔지
 
 **일정과 그 준비를 함께 챙기는 macOS 캘린더 앱.**
-일정에 준비 할 일을 붙이고(「3일 전까지」), 할 일마다 사용자가 고른 시작 알림 하나를 울린다.
+일정에 준비 할 일을 붙이고, 할 일마다 사용자가 고른 시작 알림 하나를 울린다.
+딸린 할 일의 마감은 일정이 정한다(시각 일정은 시작, 종일 일정은 그날 밤). 사용자는 알림만 고른다. (DESIGN 7장)
 애플 캘린더·미리 알림에 없는 것은 **일정–준비 연결**이다.
 
 SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음.
 
 **지금 단계: Phase 1 재작업 중 (2026-10-07 방향 전환 이후).**
 소요시간으로 착수일을 역산하던 방식을 버리고 위 모델로 바꾸는 중이다.
-할 일 상태 2단계화(BL-066), 알림 1단계화(BL-067), 그리드 순서·시각 형식 통일(3f)은 반영됐다. 남은 P1은 아래 순서다.
+할 일 상태 2단계화(BL-066), 알림 1단계화(BL-067), 그리드 순서·시각 형식 통일(3f), 시작 알림 칩과 딸린 할 일 규칙(BL-065, DESIGN 7장)은 반영됐다. 남은 P1은 아래 순서다.
 
-1. BL-065 시작 알림 칩 — 할 일 시트 「특정 날짜」는 끝(커밋 4·4b). **남은 것: 딸린 할 일(DESIGN 7장)** —
-   5a 할 일 시트 「일정에 맞춰」는 끝. **5b 일정 폼 초안 행·딸린 할 일 행**(아직 「N일 전까지」·소요시간 칩이 있다). 그 뒤 소요시간 코드(`DurationPreset`·`StartMomentText`) 정리
+1. 소요시간 코드 정리 — 입력 화면에서는 모두 사라졌다(BL-065 완료). 안 쓰는 `DurationPreset`·`StartMomentText`·
+   `DaysBeforeChips`(BL-079 때 다시 쓸 수 있음) 등을 리팩터링 커밋으로 걷어낸다
 2. BL-040 되돌리기 — BL-068 보다 먼저. 그 뒤 일정 삭제 시 딸린 미완료 준비 함께 삭제(DESIGN 5장 ⑨)
 3. BL-069 일정 반복 입력 → BL-068 반복 일정에 준비 자동 생성
 
@@ -37,7 +38,7 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 - `parentEventID` 를 `nil` 로 만드는 곳은 `ManagedTask.detachFromParent` 하나뿐이고,
   이유(`TaskLinkPolicy.DetachReason`)를 인자로 강제한다. 새 경로를 만들지 말 것.
 - **코드를 고쳤으면 `./Tests/run-link-tests.sh` 를 반드시 돌린다.** 연결뿐 아니라 알림·정렬·문구 테스트도
-  들어 있다. (2026-10-13 기준 489건)
+  들어 있다. (2026-11-02 기준 498건)
 - 지금은 **일정을 지워도 딸린 할 일은 남는다** (삭제 확인창에 그렇게 적혀 있다).
   반복·일반 모두 「딸린 미완료 준비도 함께 지운다(완료는 남김)」로 바뀐다. 그래서 BL-040(되돌리기)이 먼저다.
   앱 밖에서 사라진 일정은 지우지 않고 연결 유지 + 알림 보류.
@@ -83,7 +84,7 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `isMissed` (마감 지남) | 「늦음」, 「기한 지난 할 일」 |
 | TO-DO | 「할 일」 |
 | 알림 날짜가 오늘 | 「오늘 시작」 |
-| 착수마감 (옛 모델) | 「이때 시작해야 해요」 — `StartMomentText` 에 남은 옛 문구. 커밋 6에서 정리 |
+| 착수마감 (옛 모델) | 「이때 시작해야 해요」 — 이제 화면에 나오지 않는다. `StartMomentText` 는 정리 대상 |
 
 **「착수」·「리드타임」·「마감시각」은 화면에 절대 쓰지 않는다.** (원칙 4)
 
@@ -190,8 +191,8 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `ManagedTask.swift` | SwiftData 모델. 마감·알림 오프셋(`LeadTime`)·상태·미루기 |
 | `TaskResolution.swift` | 부모 일정을 반영해 마감을 확정하는 계층. `TaskLinkMaintenance.sync`, 공용 정렬 `listOrder` |
 | `TaskLinkPolicy.swift` | **연결을 바꾸는 판단이 있는 유일한 곳.** 순수 함수 |
-| `TaskEditorView.swift` | 할 일 추가·수정 시트 (소요시간 입력 → 시작 알림 칩으로 교체 예정, BL-065) |
-| `EventEditorView.swift` | 일정 추가·수정 시트. 딸린 할 일 초안 행 포함 |
+| `TaskEditorView.swift` | 할 일 추가·수정 시트. 마감(특정 날짜/일정에 맞춰)과 시작 알림 칩 |
+| `EventEditorView.swift` | 일정 추가·수정 시트. 딸린 할 일 초안 행(알림 칩)과 기존 딸린 할 일 행 |
 | `EventDeletion.swift` | 일정 삭제 확인 흐름. 시트와 우측 패널이 같이 쓴다 |
 | `TaskTimeText.swift` | 할 일 행의 「마감 … · 알림 …」 문구. 패널·미리보기 공용 |
 | `StartMomentText.swift` | 옛 착수 시점 문구. 커밋 6에서 정리 대상 |
@@ -199,6 +200,6 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `NotificationScheduler.swift` | 할 일당 알림 1개, 롤링 스케줄러 (60/64) |
 | `NotificationCompletion.swift` | 알림 버튼 「완료」·「30분 미루기」 처리 |
 | `PersistenceReporter.swift` | 명시적 저장. 실패를 화면까지 올린다 |
-| `SheetChrome.swift` | 시트 공통 틀. 닫기 버튼, 더티 확인 |
+| `SheetChrome.swift` | 시트 공통 틀. 닫기 버튼, 더티 확인, 시작 알림 칩(`StartAlarmChips`·`StartAlarmInput`) |
 | `FeatureFlags.swift` | 기능 플래그 (호버 미리보기·메아리 — 둘 다 꺼짐, 제거 후보) |
-| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-10-13 기준 489건) |
+| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-11-02 기준 498건) |
