@@ -61,46 +61,31 @@ struct EventEditorView: View {
     @State private var didLoadLinked = false
 
     /// 연결된 할 일 한 건의 편집 상태.
+    ///
+    /// 여기서 고치는 것은 **제목뿐**이다. 마감은 일정이 정하고(DESIGN 7장 ⑰),
+    /// 알림은 행을 눌러 할 일 시트에서 고친다. 그래서 이 시트는 오프셋을 다시 쓰지 않는다.
     struct LinkedTaskEdit: Identifiable {
         let id: UUID
         let task: ManagedTask
         var title: String
-        var daysBefore: Int
         let originalTitle: String
-        let originalDaysBefore: Int
 
-        var isChanged: Bool {
-            title != originalTitle || daysBefore != originalDaysBefore
-        }
+        var isChanged: Bool { title != originalTitle }
     }
 
     /// 폼 안에서만 쓰는 할 일 초안.
+    ///
+    /// 마감은 고르지 않는다 — 일정이 정한다. 시각 일정이면 일정 시작, 종일이면 그날 밤. (DESIGN 7장 ⑰)
+    /// 고르는 것은 알림 하나다. 칩은 할 일 시트의 「일정에 맞춰」와 **같은 부품**이다.
     struct DraftTask: Identifiable {
         let id = UUID()
         var title = ""
-        /// 부모 일정 기준 며칠 전까지가 **마감**인지.
-        var daysBefore = 1
-        /// 「며칠 전까지」의 직접 입력 줄을 펼쳤는지.
-        var isEnteringCustomDays = false
-        /// 소요시간. 고르면 착수일 역산이 켜진다.
-        var duration: TimeInterval?
-        /// 직접 입력 줄을 펼쳤는지.
-        var isEnteringCustom = false
-        var hours = 0
-        var minutes = 0
+        var alarm: StartAlarmInput
 
-        /// 직접 입력값을 반영한 최종 소요시간.
-        var resolvedDuration: TimeInterval? {
-            if isEnteringCustom {
-                let total = TimeInterval(hours * 3600 + minutes * 60)
-                return total > 0 ? total : nil
-            }
-            return duration
+        init(allDay: Bool) {
+            alarm = .attachedDefault(allDay: allDay)
         }
     }
-
-    /// 폼 한 줄에 들어가는 프리셋. 폭이 좁아 셋으로 줄였다.
-    private static let inlinePresets: [DurationPreset] = Array(DurationPreset.all.prefix(3))
 
     private var isEditing: Bool { event != nil }
 
@@ -150,7 +135,10 @@ struct EventEditorView: View {
         .onAppear(perform: syncDraft)
         .onChange(of: startDay) { _, _ in syncDraft() }
         .onChange(of: endDay) { _, _ in syncDraft() }
-        .onChange(of: isAllDay) { _, _ in syncDraft() }
+        .onChange(of: isAllDay) { _, _ in
+            syncDraft()
+            allDayDidChange()
+        }
         .onDisappear { draft.clear() }
     }
 
@@ -341,7 +329,8 @@ struct EventEditorView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty
                           || manager.writableCalendars.isEmpty
-                          || !isRangeValid)
+                          || !isRangeValid
+                          || draftTasks.contains { $0.alarm.leadTime == nil })
         }
         .padding(16)
     }
@@ -384,7 +373,7 @@ struct EventEditorView: View {
             }
 
             Button {
-                draftTasks.append(DraftTask())
+                draftTasks.append(DraftTask(allDay: isAllDay))
             } label: {
                 Label("할 일 추가", systemImage: "plus")
                     .font(.caption)
@@ -393,7 +382,7 @@ struct EventEditorView: View {
         }
     }
 
-    /// 한 줄에 제목 · 마감 시점 · 소요시간을 모두 담는다.
+    /// 한 줄에 제목과 알림을 담는다. 마감은 일정이 정한다. (DESIGN 7장 ⑰)
     private func draftRow(_ draft: Binding<DraftTask>) -> some View {
         SheetField(verticalPadding: 5) {
             VStack(alignment: .leading, spacing: 4) {
@@ -412,64 +401,25 @@ struct EventEditorView: View {
                     .help("이 줄 지우기")
                 }
 
-                DaysBeforeChips(
-                    label: "언제까지",
-                    daysBefore: draft.daysBefore,
-                    isEnteringCustom: draft.isEnteringCustomDays
-                )
-
-                HStack(spacing: 4) {
-                    // 독립 「할 일」 시트가 같은 것을 「얼마나 걸릴까요」로 부른다.
-                    // 한 가지를 두 곳에서 다르게 부르지 않는다.
-                    Text("얼마나 걸릴까요")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    ForEach(Self.inlinePresets) { preset in
-                        durationChip(preset.label, draft: draft) {
-                            draft.wrappedValue.duration == preset.duration
-                                && !draft.wrappedValue.isEnteringCustom
-                        } action: {
-                            draft.wrappedValue.isEnteringCustom = false
-                            draft.wrappedValue.duration =
-                                draft.wrappedValue.duration == preset.duration ? nil : preset.duration
-                        }
-                    }
-
-                    durationChip("직접", draft: draft) {
-                        draft.wrappedValue.isEnteringCustom
-                    } action: {
-                        draft.wrappedValue.isEnteringCustom.toggle()
-                        if draft.wrappedValue.isEnteringCustom { draft.wrappedValue.duration = nil }
-                    }
-
-                    if draft.wrappedValue.isEnteringCustom {
-                        TextField("0", value: draft.hours, format: .number)
-                            .textFieldStyle(.plain)
-                            .frame(width: 26)
-                            .multilineTextAlignment(.trailing)
-                        Text("시간").font(.caption2)
-                        TextField("0", value: draft.minutes, format: .number)
-                            .textFieldStyle(.plain)
-                            .frame(width: 26)
-                            .multilineTextAlignment(.trailing)
-                        Text("분").font(.caption2)
-                    }
-
-                    Spacer(minLength: 0)
-                }
+                StartAlarmChips(input: draft.alarm, alarmAt: draftAlarmAt(draft.wrappedValue.alarm))
             }
         }
     }
 
-    private func durationChip(
-        _ label: String,
-        draft: Binding<DraftTask>,
-        isOn: () -> Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        // 모양은 `SheetChip` 하나로 모았다. 보이는 결과는 종전과 같다.
-        SheetChip(label: label, isOn: isOn(), action: action)
+    /// 초안의 알림 시각. 저장할 때와 **같은 계산**(`ManagedTask.startDeadline`)을 쓴다.
+    private func draftAlarmAt(_ alarm: StartAlarmInput) -> Date? {
+        guard let leadTime = alarm.leadTime else { return nil }
+        let due = resolvedRange().start.addingTimeInterval(ManagedTask.attachedDeadlineOffset(allDay: isAllDay))
+        return ManagedTask(title: "", dueAt: due, leadTime: leadTime).startDeadline(effectiveDueAt: due)
+    }
+
+    /// 「하루 종일」을 켜고 끌 때. 칩 묶음이 바뀌므로 초안의 알림을 새 기본값으로 옮긴다.
+    /// 묶음이 바뀌면 고른 값을 그대로 옮길 수 없다(「3시간 전」은 종일 일정에 뜻이 없다).
+    private func allDayDidChange() {
+        let next = StartAlarmInput.attachedDefault(allDay: isAllDay)
+        for index in draftTasks.indices where draftTasks[index].alarm.style != next.style {
+            draftTasks[index].alarm = next
+        }
     }
 
     /// 이 일정에 이미 붙어 있는 할 일.
@@ -504,23 +454,13 @@ struct EventEditorView: View {
         guard !didLoadLinked else { return }
         didLoadLinked = true
 
-        let dayLength: TimeInterval = 24 * 60 * 60
         linkedEdits = attachedTasks.map { task in
-            let days = task.offsetFromParent.map { max(0, Int((-$0 / dayLength).rounded())) } ?? 0
-            return LinkedTaskEdit(
-                id: task.id,
-                task: task,
-                title: task.title,
-                daysBefore: days,
-                originalTitle: task.title,
-                originalDaysBefore: days
-            )
+            LinkedTaskEdit(id: task.id, task: task, title: task.title, originalTitle: task.title)
         }
     }
 
     /// 저장 시점에 연결된 할 일 변경을 한꺼번에 반영한다.
     private func applyLinkedEdits(eventStart: Date) {
-        let dayLength: TimeInterval = 24 * 60 * 60
         let keptIDs = Set(linkedEdits.map(\.id))
 
         // 목록에서 뺀 것은 지운다.
@@ -528,18 +468,11 @@ struct EventEditorView: View {
             modelContext.delete(task)
         }
 
+        // 제목만 반영한다. 오프셋(마감)은 이 시트에서 다시 쓰지 않는다 — 예전에는 제목만 고쳐도
+        // 「N일 전까지」로 다시 써서 일 단위가 아닌 오프셋(종일 일정의 +23:59)이 0시로 바뀔 수 있었다. (원칙 1)
         for edit in linkedEdits where edit.isChanged {
-            let alarmBefore = edit.task.alarmInputs
-            defer { edit.task.clearSnoozeIfAlarmChanged(from: alarmBefore) }
             let trimmed = edit.title.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { edit.task.title = trimmed }
-
-            // 「며칠 전까지」를 실제로 바꿨을 때만 오프셋을 쓴다. 제목만 고쳤는데 다시 쓰면
-            // 일 단위가 아닌 오프셋(종일 일정의 +23:59, DESIGN 7장 ⑰)이 조용히 0시로 바뀐다. (원칙 1)
-            guard edit.daysBefore != edit.originalDaysBefore else { continue }
-            let offset = -TimeInterval(edit.daysBefore) * dayLength
-            edit.task.offsetFromParent = offset
-            edit.task.dueAt = eventStart.addingTimeInterval(offset)
         }
     }
 
@@ -712,8 +645,11 @@ struct EventEditorView: View {
             let trimmed = draft.title.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
 
-            let offset = -TimeInterval(draft.daysBefore) * 24 * 60 * 60
-            let duration = draft.resolvedDuration
+            // 범위를 벗어난 알림이면 저장 버튼이 꺼져 있다. 여기 닿으면 값이 있다.
+            guard let leadTime = draft.alarm.leadTime else { continue }
+            // 마감은 일정이 정한다. 시각 일정은 시작, 종일은 그날 밤. (DESIGN 7장 ⑰)
+            // 미리보기와 같은 기준(폼의 「하루 종일」)을 쓴다.
+            let offset = ManagedTask.attachedDeadlineOffset(allDay: isAllDay)
 
             let task = ManagedTask(
                 title: trimmed,
@@ -721,9 +657,7 @@ struct EventEditorView: View {
                 parentOccurrenceDate: eventStart,
                 offsetFromParent: offset,
                 lastKnownDueAt: eventStart.addingTimeInterval(offset),
-                estimatedDuration: duration,
-                // 소요시간을 골랐으면 역산한다. 아니면 그날까지 하는 일로 둔다.
-                leadTime: duration == nil ? .fixed(days: 0) : .durationBased
+                leadTime: leadTime
             )
             modelContext.insert(task)
         }
@@ -743,7 +677,7 @@ struct EventEditorView: View {
 /// **행을 두 섹션으로 나눈다. 「밝아지는 곳 = 눌리는 곳」.**
 ///
 ///     ┌──────────────────────────────────┬─────┐
-///     │  졸프 주제 선정하기      1일 전까지 │  ⊖  │
+///     │  졸프 주제 선정하기     알림 1일 전 │  ⊖  │
 ///     └──────────────────────────────────┴─────┘
 ///           본문 (누르면 상세 편집)          삭제
 ///
@@ -756,7 +690,8 @@ struct EventEditorView: View {
 ///
 /// **스테퍼를 뺀 이유** — 같은 값을 두 경로에서 고칠 수 있으면 어느 쪽이 기준인지
 /// 모호해진다. 상세 편집에서 더 편하게 조정할 수 있으므로 중복이다. 스테퍼를
-/// 조작하려다 시트가 열리는 충돌도 함께 사라진다. 「N일 전까지」는 값 확인용으로 남긴다.
+/// 조작하려다 시트가 열리는 충돌도 함께 사라진다. 오른쪽 글자는 고른 알림을 보여주기만 한다.
+/// (2026-10-13 전에는 「N일 전까지」였다. 마감은 이제 일정이 정한다 — DESIGN 7장 ⑰)
 private struct AttachedTaskRow: View {
     @Binding var edit: EventEditorView.LinkedTaskEdit
     /// 본문을 눌러 세부 편집으로 들어간다.
@@ -770,7 +705,7 @@ private struct AttachedTaskRow: View {
     var body: some View {
         HStack(spacing: 0) {
             // 좌측 — 본문. 읽기 전용이며 누르면 상세 편집으로 넘어간다.
-            RowSection(action: onOpen, help: "소요시간 등 자세히 고치기", expands: true) {
+            RowSection(action: onOpen, help: "알림 등 자세히 고치기", expands: true) {
                 HStack(spacing: 8) {
                     Text(edit.title.isEmpty ? "제목 없음" : edit.title)
                         .font(.callout)
@@ -780,7 +715,10 @@ private struct AttachedTaskRow: View {
 
                     Spacer(minLength: 8)
 
-                    Text(edit.daysBefore == 0 ? "당일까지" : "\(edit.daysBefore)일 전까지")
+                    Text(StartAlarmInput.summary(
+                        leadTime: edit.task.leadTime,
+                        estimatedDuration: edit.task.estimatedDuration
+                    ))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize()

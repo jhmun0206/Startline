@@ -217,6 +217,20 @@ func testStartAlarmInput() {
     report.equal("시각 일정에 붙은 「1일 전 오전 9시」 → 기존 값", crossedBack.legacyLabel, "1일 전 오전 9시 (기존 값)")
     report.equal("… 저장값 그대로", crossedBack.leadTime, .morning(daysBefore: 1))
 
+    // ── 일정 시트 딸린 할 일 행의 짧은 표시 (커밋 5b)
+    func summary(_ lead: LeadTime, _ duration: TimeInterval? = nil) -> String {
+        StartAlarmInput.summary(leadTime: lead, estimatedDuration: duration)
+    }
+    report.equal("행 — 1일 전", summary(.fixed(days: 1)), "알림 1일 전")
+    report.equal("행 — 0일 = 마감 시각", summary(.fixed(days: 0)), "알림 마감 시각")
+    report.equal("행 — 3시간 전", summary(.fixedHours(3)), "알림 3시간 전")
+    report.equal("행 — 30분 전", summary(.fixedMinutes(30)), "알림 30분 전")
+    report.equal("행 — 당일 오전 9시", summary(.morning(daysBefore: 0)), "알림 당일 오전 9시")
+    report.equal("행 — 1일 전 오전 9시", summary(.morning(daysBefore: 1)), "알림 1일 전 오전 9시")
+    report.equal("행 — 없음", summary(.none), "알림 없음")
+    report.equal("행 — 옛 소요 30분", summary(.durationBased, 1800), "알림 30분 전")
+    report.equal("행 — 옛 소요 없음", summary(.durationBased, nil), "알림 없음")
+
     // ── 미리보기 한 줄
     report.equal("미리보기", StartAlarmInput.preview(alarmAt: date(2026, 10, 10, 20, 59), now: now, calendar: cal),
                  "10월 10일 (토) 오후 8:59에 알림이 울려요")

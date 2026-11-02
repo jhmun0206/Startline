@@ -475,6 +475,21 @@ struct StartAlarmInput: Equatable {
         return "\(range.lowerBound)~\(range.upperBound)\(unit) 사이로 적어 주세요."
     }
 
+    /// 저장된 알림을 짧게. 일정 시트의 딸린 할 일 행처럼 **보여주기만** 하는 곳에 쓴다.
+    /// 「알림 1일 전」 / 「알림 당일 오전 9시」 / 「알림 30분 전」 / 「알림 없음」
+    static func summary(leadTime: LeadTime, estimatedDuration: TimeInterval?) -> String {
+        switch leadTime {
+        case .fixed(let days): return days == 0 ? "알림 마감 시각" : "알림 \(days)일 전"
+        case .fixedHours(let hours): return "알림 \(hours)시간 전"
+        case .fixedMinutes(let minutes): return "알림 \(minutes)분 전"
+        case .morning(let days): return "알림 \(morningLabel(days))"
+        case .none: return "알림 없음"
+        case .durationBased:
+            guard let estimatedDuration, estimatedDuration > 0 else { return "알림 없음" }
+            return "알림 \(StartlineFormat.duration(estimatedDuration)) 전"
+        }
+    }
+
     /// 칩 아래 미리보기 한 줄. 「없음」이거나 마감·알림을 알 수 없으면 `nil` — 줄을 숨긴다.
     ///
     /// 알림 시각이 이미 지났으면 알려 주되 **저장은 막지 않는다.**
