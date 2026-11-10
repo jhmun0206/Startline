@@ -11,13 +11,11 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 
 **지금 단계: Phase 1 재작업 중 (2026-10-07 방향 전환 이후).**
 소요시간으로 착수일을 역산하던 방식을 버리고 위 모델로 바꾸는 중이다.
-할 일 상태 2단계화(BL-066), 알림 1단계화(BL-067), 그리드 순서·시각 형식 통일(3f), 시작 알림 칩과 딸린 할 일 규칙(BL-065, DESIGN 7장)은 반영됐다. 남은 P1은 아래 순서다.
+할 일 상태 2단계화(BL-066), 알림 1단계화(BL-067), 그리드 순서·시각 형식 통일(3f), 시작 알림 칩과 딸린 할 일 규칙(BL-065, DESIGN 7장), 소요시간 코드 정리는 반영됐다. 남은 P1은 아래 순서다.
 
-1. 소요시간 코드 정리 — 입력 화면에서는 모두 사라졌다(BL-065 완료). 안 쓰는 `DurationPreset`·`StartMomentText`·
-   `DaysBeforeChips`(BL-079 때 다시 쓸 수 있음) 등을 리팩터링 커밋으로 걷어낸다
-2. 일정 시트 확장 — BL-069 반복 입력 + BL-025 위치·메모 (2026-11-10 앞당김, 커밋은 나눈다)
-3. BL-040 되돌리기 — BL-068 보다 먼저. 그 뒤 일정 삭제 시 딸린 미완료 준비 함께 삭제(DESIGN 5장 ⑨)
-4. BL-068 반복 일정에 준비 자동 생성
+1. 일정 시트 확장 — BL-069 반복 입력 + BL-025 위치·메모 (2026-11-10 앞당김, 커밋은 나눈다)
+2. BL-040 되돌리기 — BL-068 보다 먼저. 그 뒤 일정 삭제 시 딸린 미완료 준비 함께 삭제(DESIGN 5장 ⑨)
+3. BL-068 반복 일정에 준비 자동 생성
 
 명세서는 `Startline_명세서_v0.3.md`, 미룬 일은 `docs/BACKLOG.md`.
 
@@ -39,7 +37,7 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 - `parentEventID` 를 `nil` 로 만드는 곳은 `ManagedTask.detachFromParent` 하나뿐이고,
   이유(`TaskLinkPolicy.DetachReason`)를 인자로 강제한다. 새 경로를 만들지 말 것.
 - **코드를 고쳤으면 `./Tests/run-link-tests.sh` 를 반드시 돌린다.** 연결뿐 아니라 알림·정렬·문구 테스트도
-  들어 있다. (2026-11-02 기준 498건)
+  들어 있다. (2026-11-10 기준 474건)
 - 지금은 **일정을 지워도 딸린 할 일은 남는다** (삭제 확인창에 그렇게 적혀 있다).
   반복·일반 모두 「딸린 미완료 준비도 함께 지운다(완료는 남김)」로 바뀐다. 그래서 BL-040(되돌리기)이 먼저다.
   앱 밖에서 사라진 일정은 지우지 않고 연결 유지 + 알림 보류.
@@ -85,7 +83,6 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `isMissed` (마감 지남) | 「늦음」, 「기한 지난 할 일」 |
 | TO-DO | 「할 일」 |
 | 알림 날짜가 오늘 | 「오늘 시작」 |
-| 착수마감 (옛 모델) | 「이때 시작해야 해요」 — 이제 화면에 나오지 않는다. `StartMomentText` 는 정리 대상 |
 
 **「착수」·「리드타임」·「마감시각」은 화면에 절대 쓰지 않는다.** (원칙 4)
 
@@ -196,11 +193,10 @@ SwiftUI + EventKit + SwiftData. macOS 14.6 이상. 외부 라이브러리 없음
 | `EventEditorView.swift` | 일정 추가·수정 시트. 딸린 할 일 초안 행(알림 칩)과 기존 딸린 할 일 행 |
 | `EventDeletion.swift` | 일정 삭제 확인 흐름. 시트와 우측 패널이 같이 쓴다 |
 | `TaskTimeText.swift` | 할 일 행의 「마감 … · 알림 …」 문구. 패널·미리보기 공용 |
-| `StartMomentText.swift` | 옛 착수 시점 문구. 커밋 6에서 정리 대상 |
 | `TodayBanner.swift` | 「오늘 시작」/「기한 지난 할 일」 배너 |
 | `NotificationScheduler.swift` | 할 일당 알림 1개, 롤링 스케줄러 (60/64) |
 | `NotificationCompletion.swift` | 알림 버튼 「완료」·「30분 미루기」 처리 |
 | `PersistenceReporter.swift` | 명시적 저장. 실패를 화면까지 올린다 |
 | `SheetChrome.swift` | 시트 공통 틀. 닫기 버튼, 더티 확인, 시작 알림 칩(`StartAlarmChips`·`StartAlarmInput`) |
 | `FeatureFlags.swift` | 기능 플래그 (호버 미리보기·메아리 — 둘 다 꺼짐, 제거 후보) |
-| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-11-02 기준 498건) |
+| `Tests/` | 회귀 테스트. `run-link-tests.sh` 하나로 전부 돈다 (2026-11-10 기준 474건) |
