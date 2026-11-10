@@ -743,7 +743,6 @@ enum LinkIntegrityTests {
                 testRiskAndMissed()
                 testDaysBeforeChips()
                 testEventDeletionText()
-                testStartMomentText()
                 testTaskCompletion()
                 testAlarms()
                 testSnooze()

@@ -58,17 +58,6 @@ enum LeadTimeKind: String, Codable, CaseIterable {
     /// 2026-10-13 추가. 「N일 전 오전 9시」.
     case morning
     case none
-
-    var label: String {
-        switch self {
-        case .durationBased: return "소요시간 역산"
-        case .fixedDays: return "N일 전"
-        case .fixedHours: return "N시간 전"
-        case .fixedMinutes: return "N분 전"
-        case .morning: return "N일 전 오전 9시"
-        case .none: return "없음"
-        }
-    }
 }
 
 /// 착수 판정. 명세서 5.4에 따라 남은 시간을 숫자로 내보내지 않고 판정만 전달한다.
@@ -412,47 +401,9 @@ extension ManagedTask {
     }
 }
 
-// MARK: - 소요시간 프리셋 (명세서 12장 「소요시간 입력 마찰」 대응)
-
-/// 소요시간 입력 프리셋.
-///
-/// 라벨에 실제 값을 그대로 드러낸다. 「반나절 / 하루」는 달력 시간(12/24시간)과
-/// 업무시간(4/8시간) 중 어느 쪽인지 사람마다 달리 읽어 착수마감이 크게 달라진다.
-/// 업무시간 기준으로 갈지는 명세서 13장 #2 로 열려 있다. (BL-012)
-struct DurationPreset: Identifiable {
-    let label: String
-    let duration: TimeInterval
-
-    var id: String { label }
-
-    static let all: [DurationPreset] = [
-        DurationPreset(label: "30분", duration: 30 * 60),
-        DurationPreset(label: "1시간", duration: 60 * 60),
-        DurationPreset(label: "3시간", duration: 3 * 60 * 60),
-        DurationPreset(label: "12시간", duration: 12 * 60 * 60),
-        DurationPreset(label: "24시간", duration: 24 * 60 * 60),
-    ]
-}
-
 // MARK: - 표시 형식
 
 nonisolated enum StartlineFormat {
-
-    /// "9월 23일 (수) 14:00"
-    static let dayTime: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .startlineDisplay
-        formatter.dateFormat = "M월 d일 (E) HH:mm"
-        return formatter
-    }()
-
-    /// "2026년 9월 23일 (수) 14:00"
-    static let fullDayTime: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .startlineDisplay
-        formatter.dateFormat = "yyyy년 M월 d일 (E) HH:mm"
-        return formatter
-    }()
 
     /// "9월 27일 (일)"
     static let spokenDay: DateFormatter = {
